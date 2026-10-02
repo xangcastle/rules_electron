@@ -37,12 +37,14 @@ _TARGET_TOOLS = {
     "appx": ["win_code_sign"],
 }
 
-def _tool_labels(required_tools, builder_tools, arch):
+def _tool_labels(required_tools, builder_tools):
     labels = []
     for tool in required_tools:
         if tool == "dmgbuild":
-            dmg_arch = "x86_64" if arch == "x64" else arch
-            labels.append(builder_tools + "//:dmgbuild_" + dmg_arch)
+            # The dmgbuild/python tooling runs on the HOST to assemble the DMG
+            # for any target arch: both host bundles are required.
+            labels.append(builder_tools + "//:dmgbuild_arm64")
+            labels.append(builder_tools + "//:dmgbuild_x86_64")
         else:
             labels.append(builder_tools + "//:" + tool)
     return labels
@@ -109,7 +111,9 @@ def electron_app(
             '.webpack/main' for forge layouts, 'electron/main.js' for
             plain-JS mains).
         runner_tools: npm packages the packager needs at runtime. Default:
-            electron-builder + 7zip-bin (fuses-flipping apps add @electron/fuses).
+            electron-builder + 7zip-bin (fuses-flipping apps add
+            @electron/fuses); 7zip-bin is always appended (it extracts the
+            packaging toolsets) and must be a dependency of the app.
         scripts: electron-builder lifecycle scripts (afterpack, afterSign,
             afterAllArtifactBuild); *.bazel.js variants are wired automatically.
         resources: Additional resources staged preserving package-relative paths.
@@ -142,6 +146,9 @@ def electron_app(
         renderer_entrypoints = ["index.html", "welcomeScreen.html"]
     if runner_tools == None:
         runner_tools = ["electron-builder", "7zip-bin"]
+    if "7zip-bin" not in runner_tools:
+        # Required to extract the pinned packaging toolsets.
+        runner_tools.append("7zip-bin")
     if scripts == None:
         scripts = []
     if resources == None:
@@ -169,6 +176,7 @@ def electron_app(
         env = env,
         node_modules = [node_modules],
         package_json = package_json,
+        resources = resources,
         args = dev_args,
         visibility = visibility,
         **kwargs
@@ -238,7 +246,7 @@ def electron_app(
             if cache_key_label:
                 builder_kwargs["electron_cache"] = cache_key_label
             if required_tools:
-                builder_kwargs["builder_cache"] = _tool_labels(required_tools, builder_tools, arch)
+                builder_kwargs["builder_cache"] = _tool_labels(required_tools, builder_tools)
             _electron_builder(
                 name = label,
                 **builder_kwargs

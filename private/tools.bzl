@@ -37,16 +37,16 @@ _BUILDER_TOOLS = {
         "sha256": "593a9a92ef958321293ac6a2ee61e64bf1bd543142a5bd6b3d310709cc924103",
     },
     "dmgbuild_arm64": {
-        "root": "dmg-builder@1.2.5",
-        "release": "dmg-builder@1.2.5",
+        "root": "dmg-builder@1.2.0",
+        "release": "dmg-builder@1.2.0",
         "file": "dmgbuild-bundle-arm64-75c8a6c.tar.gz",
-        "sha256": "793404d0c96687e27d5ee40a668d498c92e36a64d6c2906df511031adb33cbeb",
+        "sha256": "a785f2a385c8c31996a089ef8e26361904b40c772d5ea65a36001212f1fc25e0",
     },
     "dmgbuild_x86_64": {
-        "root": "dmg-builder@1.2.5",
-        "release": "dmg-builder@1.2.5",
+        "root": "dmg-builder@1.2.0",
+        "release": "dmg-builder@1.2.0",
         "file": "dmgbuild-bundle-x86_64-75c8a6c.tar.gz",
-        "sha256": "1664972f9cc2d6e8fce3b63e42cd30078aff602669c5856939c4519921200433",
+        "sha256": "87b3bb72148b11451ee90ede79cc8d59305c9173b68b0f2b50a3bea51fc4a4e2",
     },
 }
 

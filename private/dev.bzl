@@ -17,25 +17,37 @@ def _electron_dev_impl(ctx):
         sp = file.short_path
         return sp[3:] if sp.startswith("../") else sp
 
-    bundle_rels = [runfiles_rel(f) for f in ctx.files.bundles]
+    bundle_rels = [{"src": runfiles_rel(f), "dest": "dist"} for f in ctx.files.bundles]
     electron_zip_rel = runfiles_rel(ctx.file.electron_zip) if ctx.attr.electron_zip else "-"
+    resource_args = []
+    for f in ctx.files.resources:
+        rel = runfiles_rel(f)
+        dest = rel[len(ctx.label.package) + 1:] if ctx.label.package else rel
+        resource_args.append({"src": rel, "dest": dest})
+
+    manifest = ctx.actions.declare_file(ctx.label.name + "_manifest.json")
+    ctx.actions.write(
+        output = manifest,
+        content = json.encode({
+            "app_main": ctx.attr.app_main,
+            "bundles": bundle_rels,
+            "resources": resource_args,
+        }),
+    )
 
     executable = js_stub_binary(
         ctx,
         node,
         ctx.file._driver,
-        runfiles = [ctx.file.package_json] + ([ctx.file.electron_zip] if ctx.attr.electron_zip else []),
-        embedded_args = [
-            str(len(bundle_rels)),
-            ctx.file.package_json.short_path,
-            electron_zip_rel,
-            ctx.attr.app_main,
-        ] + bundle_rels,
+        runfiles = [manifest, ctx.file.package_json] +
+                   ([ctx.file.electron_zip] if ctx.attr.electron_zip else []),
+        embedded_args = [],
     )
 
     runfiles = ctx.runfiles(
-        files = [ctx.file.package_json, ctx.file._driver, node] +
+        files = [ctx.file.package_json, ctx.file._driver, node, manifest] +
                 list(ctx.files.bundles) +
+                list(ctx.files.resources) +
                 ([ctx.file.electron_zip] if ctx.attr.electron_zip else []),
         transitive_files = depset(transitive = [
             dep[DefaultInfo].files
@@ -69,6 +81,11 @@ _electron_dev = rule(
         ),
         "node_modules": attr.label_list(
             doc = "Linked node_modules targets symlinked into the stage (runtime deps).",
+        ),
+        "resources": attr.label_list(
+            allow_files = True,
+            doc = "Resource files staged preserving their package-relative paths " +
+                  "(e.g. the plain-JS main process under electron/).",
         ),
         "package_json": attr.label(
             allow_single_file = True,

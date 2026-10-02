@@ -10,7 +10,9 @@
 """
 
 load("//private:caches.bzl", _electron_caches = "electron_caches")
+load("//private:caches.bzl", _node_headers = "node_headers")
 load("//private:tools.bzl", _builder_tools = "builder_tools")
 
 builder_tools = _builder_tools
 electron_caches = _electron_caches
+node_headers = _node_headers

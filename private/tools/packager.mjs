@@ -30,55 +30,86 @@ function argList(name) {
   return out;
 }
 
-function extractArchive(archivePath, destinationDir, homeDir) {
+function extractArchive(archivePath, destinationDir, sevenZipRoot) {
   fs.mkdirSync(destinationDir, { recursive: true });
   const lower = archivePath.toLowerCase();
   if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
     execSync(`tar -xzf ${JSON.stringify(archivePath)} -C ${JSON.stringify(destinationDir)}`, { stdio: "ignore" });
     return;
   }
-  const sevenZip = resolveSevenZip();
+  const sevenZip = resolveSevenZip(sevenZipRoot);
   execSync(`${JSON.stringify(sevenZip)} x -y -o${JSON.stringify(destinationDir)} ${JSON.stringify(archivePath)}`, { stdio: "ignore" });
 }
 
-function resolveSevenZip() {
-  const { path7za } = require("7zip-bin");
-  if (fs.existsSync(path7za)) {
-    return path7za;
+function resolveSevenZip(sevenZipRoot) {
+  if (!sevenZipRoot) {
+    console.error("packager: 7za required but 7zip-bin is not among runner_tools");
+    process.exit(2);
   }
-  console.error("packager: 7zip-bin not found in the packager runfiles");
+  const platformDir = { darwin: "mac", linux: "linux", win32: "win" }[process.platform];
+  const archDir = { arm64: "arm64", x64: "x64", ia32: "ia32" }[process.arch] || "x64";
+  const candidate = path.join(sevenZipRoot, platformDir, archDir, "7za");
+  if (fs.existsSync(candidate)) {
+    return candidate;
+  }
+  console.error("packager: 7za not found at " + candidate);
+  try {
+    console.error("packager: sevenZipRoot contents:", fs.readdirSync(sevenZipRoot));
+    console.error("packager: sevenZipRoot realpath:", fs.realpathSync(sevenZipRoot));
+  } catch (e) {
+    console.error("packager: sevenZipRoot unreadable:", e.message);
+  }
   process.exit(2);
 }
 
-function stageBuilderCache(builderCacheFiles, stage, homeDir) {
+function hashUrlSafe(input, length = 6) {
+  // electron-builder's deterministic URL hash (DJB2, unsigned, base-36).
+  let hash = 5381;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash) ^ input.charCodeAt(i);
+  }
+  hash >>>= 0;
+  const out = hash.toString(36);
+  return out.length >= length ? out.slice(0, length) : out.padStart(length, "0");
+}
+
+function stageBuilderCache(builderCacheFiles, stage, homeDir, sevenZipRoot) {
   const cacheDir = path.join(stage, "eb-cache");
-  const downloadsDir = path.join(cacheDir, "downloads");
-  fs.mkdirSync(downloadsDir, { recursive: true });
+  fs.mkdirSync(cacheDir, { recursive: true });
+
   for (const relativeLayout of Object.keys(builderCacheFiles)) {
     const source = builderCacheFiles[relativeLayout];
-    const toolRoot = path.join(cacheDir, relativeLayout.split("/")[0]);
+    const toolRootName = relativeLayout.split("/")[0];
     const fileName = path.basename(relativeLayout);
-    const releaseName = fileName.replace(/\.(7z|tar\.gz|tgz)$/i, "");
-    const archiveCopy = path.join(toolRoot, fileName);
-    fs.mkdirSync(toolRoot, { recursive: true });
+
+    if (toolRootName.startsWith("dmg-builder@")) {
+      // JS side (dmgbuild): <EBC>/<release>/<stem>-<suffix5>/ extracted with
+      // the top-level archive directory stripped, plus a .complete marker
+      // that short-circuits any download attempt.
+      const baseUrl =
+        "https://github.com/electron-userland/electron-builder-binaries/releases/download/";
+      const suffix = hashUrlSafe(`${baseUrl}-${toolRootName}-${fileName}`, 5);
+      const folderName = fileName.replace(/\.(tar\.gz|tgz)$/, "") + "-" + suffix;
+      const extractDir = path.join(cacheDir, toolRootName, folderName);
+      fs.mkdirSync(extractDir, { recursive: true });
+      execSync(
+        `tar -xzf ${JSON.stringify(path.resolve(source))} -C ${JSON.stringify(extractDir)} --strip-components 1`,
+        { stdio: "ignore" },
+      );
+      fs.writeFileSync(extractDir + ".complete", "");
+      continue;
+    }
+
+    // Go side (app-builder: AppImage, WinCodeSign, NSIS): the extracted
+    // toolset directory under <tool>/<release>/.
+    const toolDir = path.join(cacheDir, toolRootName);
+    const archiveCopy = path.join(toolDir, fileName);
+    fs.mkdirSync(toolDir, { recursive: true });
     fs.copyFileSync(source, archiveCopy);
-
-    // JS-side downloader layout (dmgbuild): downloads/<sha512-of-url>/<file>.
-    const url =
-      "https://github.com/electron-userland/electron-builder-binaries/releases/download/" +
-      releaseName + "/" + fileName;
-    const urlHash = crypto.createHash("sha512").update(url).digest("hex");
-    const hashedDir = path.join(downloadsDir, urlHash);
-    fs.mkdirSync(hashedDir, { recursive: true });
-    fs.copyFileSync(source, path.join(hashedDir, fileName));
-
-    // Go-side (app-builder) tools cache: the EXTRACTED toolset directory is
-    // <tool>/<release>/ (contents at that level); a `.complete` marker skips
-    // re-extraction. Extract to a temp dir first, then hoist the single
-    // top-level entry (if any), so the layout matches a Go-side install.
-    const extracted = path.join(toolRoot, releaseName);
-    const tmp = path.join(toolRoot, ".extract-" + releaseName);
-    extractArchive(archiveCopy, tmp, path.dirname(source));
+    const releaseName = fileName.replace(/\.(7z|tar\.gz|tgz)$/i, "");
+    const extracted = path.join(toolDir, releaseName);
+    const tmp = path.join(toolDir, ".extract-" + releaseName);
+    extractArchive(archiveCopy, tmp, sevenZipRoot);
     const entries = fs.readdirSync(tmp);
     if (entries.length === 1 && fs.statSync(path.join(tmp, entries[0])).isDirectory()) {
       fs.renameSync(path.join(tmp, entries[0]), extracted);
@@ -89,9 +120,9 @@ function stageBuilderCache(builderCacheFiles, stage, homeDir) {
     fs.writeFileSync(extracted + ".complete", "");
   }
 
-  // The Go binary (app-builder) resolves its cache from HOME/XDG paths, the
-  // JS side from ELECTRON_BUILDER_CACHE: one content directory, three
-  // addresses, so both sides see the same pre-populated cache.
+  // The Go binary resolves its cache from HOME/XDG paths, the JS side from
+  // ELECTRON_BUILDER_CACHE: one content directory, three addresses, so both
+  // sides see the same pre-populated cache.
   const xdgDir = path.join(homeDir, ".cache");
   fs.mkdirSync(xdgDir, { recursive: true });
   const macDir = path.join(homeDir, "Library", "Caches");
@@ -99,13 +130,6 @@ function stageBuilderCache(builderCacheFiles, stage, homeDir) {
   fs.symlinkSync(cacheDir, path.join(xdgDir, "electron-builder"), "dir");
   fs.symlinkSync(cacheDir, path.join(macDir, "electron-builder"), "dir");
   return cacheDir;
-}
-
-function extractElectronZip(zipPath, stage) {
-  const distDir = path.join(stage, "electron-dist");
-  fs.mkdirSync(distDir, { recursive: true });
-  execSync(`unzip -o -q ${JSON.stringify(path.resolve(zipPath))} -d ${JSON.stringify(distDir)}`, { stdio: "ignore" });
-  return distDir;
 }
 
 async function main() {
@@ -158,7 +182,12 @@ async function main() {
       const sep = entry.indexOf("=");
       entries[entry.slice(0, sep)] = abs(entry.slice(sep + 1));
     }
-    electronBuilderCacheDir = stageBuilderCache(entries, stage, homeDir);
+    electronBuilderCacheDir = stageBuilderCache(
+        entries,
+        stage,
+        homeDir,
+        arg("seven_zip") ? abs(arg("seven_zip")) : null,
+    );
   }
 
   // bundles -> staging/dist/ (contents merged into the dist root).

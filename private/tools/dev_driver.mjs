@@ -4,32 +4,35 @@ import path from "node:path";
 import { execSync, spawn } from "node:child_process";
 
 // Launches an Electron app against pre-built bundles. Stages an ephemeral
-// dist/ from runfiles, extracts the pinned Electron zip, symlinks the linked
-// node_modules, and executes Electron with stdio inherited. The stage is
-// removed on exit; Ctrl+C reaches the app through signal forwarding.
+// tree (bundles -> dist/, resources at their package-relative paths, the
+// app package.json with main patched to the entry), extracts the pinned
+// Electron zip, symlinks the linked node_modules, and executes Electron
+// with stdio inherited. The stage is removed on exit; Ctrl+C reaches the
+// app through signal forwarding.
 //
-// argv contract: <bundle_count> <package_json> <electron_zip|-> <app_main>
-// <bundle...> <passthrough...>
+// argv contract (positions fixed by the rule's embedded_args):
+//   [2] package.json absolute path (a resolved runfile arg)
+//   [3] electron zip absolute path, or "-" when the app has none
+//   [4] bundle count
+//   [5] resource count
+//   [6] app_main (package-relative entry, becomes package.json main)
+//   [7..7+bundleCount)  bundle paths, absolute or runfiles-root-relative
+//   [..+resourceCount)  resource paths, package-relative
+//   then passthrough args from bazel run.
 
-const [countRaw, packageJsonRel, electronZipRel, appMain, ...rest] =
-  process.argv.slice(2);
-
-const bundleCount = Number(countRaw);
-if (
-  !Number.isInteger(bundleCount) ||
-  bundleCount < 0 ||
-  !packageJsonRel ||
-  electronZipRel === undefined ||
-  !appMain
-) {
-  console.error(
-    "dev_driver: expected <bundle_count> <package_json> <electron_zip|-> <app_main> <bundle...> [args...]",
-  );
+// argv: <manifest_abs> — everything else comes from the manifest.
+const manifestPath = process.argv[2];
+if (!manifestPath) {
+  console.error("dev_driver: expected <manifest>");
   process.exit(2);
 }
-
-const bundleRels = rest.slice(0, bundleCount);
-const passthroughArgs = rest.slice(bundleCount);
+const spec = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const bundleRels = spec.bundles;
+const resourceRels = spec.resources;
+const passthroughArgs = [];
+const appMain = spec.app_main;
+const packageJsonPath = process.argv[3];
+const electronZipPath = process.argv[4] !== "-" ? process.argv[4] : null;
 
 let runfilesRoot = process.env.RUNFILES_DIR;
 if (!runfilesRoot) {
@@ -43,13 +46,10 @@ if (!runfilesRoot) {
   }
 }
 
-function resolveRunfilesPath(runfilesRelativePath) {
-  const absolutePath = path.join(runfilesRoot, runfilesRelativePath);
-  if (!fs.existsSync(absolutePath)) {
-    console.error("dev_driver: not found in runfiles at " + absolutePath);
-    process.exit(2);
-  }
-  return absolutePath;
+function resolveInput(p) {
+  // Resolved runfile args are absolute; embedded rels are main-repo
+  // runfiles-root relative.
+  return path.isAbsolute(p) ? p : path.join(runfilesRoot, "_main", p);
 }
 
 const stage = fs.mkdtempSync(path.join(os.tmpdir(), "rules_electron_dev_"));
@@ -67,32 +67,66 @@ for (const [signalName, exitCode] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHU
   });
 }
 
-for (const rel of bundleRels) {
-  const source = resolveRunfilesPath(rel);
+function stageInto(source, destination) {
+  // Bundle directories merge their CONTENTS into the destination (same
+  // semantics as the packaging stage).
   const stat = fs.statSync(source);
   if (stat.isDirectory()) {
-    for (const entry of fs.readdirSync(source)) {
-      const from = path.join(source, entry);
-      const to = path.join(distDir, entry);
-      fs.rmSync(to, { recursive: true, force: true });
-      execSync(`cp -R ${JSON.stringify(from)} ${JSON.stringify(to)}`);
-    }
+    fs.mkdirSync(destination, { recursive: true });
+    copyDirContents(source, destination);
   } else {
-    fs.copyFileSync(source, path.join(distDir, path.basename(rel)));
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
   }
 }
 
-fs.copyFileSync(resolveRunfilesPath(packageJsonRel), path.join(stage, "package.json"));
-
-if (electronZipRel !== "-") {
-  const zipPath = resolveRunfilesPath(electronZipRel);
-  const electronDist = path.join(stage, "electron-dist");
-  fs.mkdirSync(electronDist, { recursive: true });
-  execSync(`unzip -o -q ${JSON.stringify(zipPath)} -d ${JSON.stringify(electronDist)}`, { stdio: "ignore" });
+function copyDirContents(src, dest) {
+  for (const entry of fs.readdirSync(src)) {
+    const from = path.join(src, entry);
+    const to = path.join(dest, entry);
+    const stat = fs.statSync(from);
+    if (stat.isDirectory()) {
+      copyRecursive(from, to);
+    } else {
+      fs.copyFileSync(from, to);
+    }
+  }
 }
 
-// The whole linked node_modules tree rides in runfiles under the workspace
-// root; symlink it so runtime requires resolve during development.
+function copyRecursive(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src)) {
+    const from = path.join(src, entry);
+    const to = path.join(dest, entry);
+    if (fs.statSync(from).isDirectory()) {
+      copyRecursive(from, to);
+    } else {
+      fs.copyFileSync(from, to);
+    }
+  }
+}
+
+for (const entry of bundleRels) {
+  stageInto(resolveInput(entry.src), distDir);
+}
+
+for (const entry of resourceRels) {
+  stageInto(resolveInput(entry.src), path.join(stage, entry.dest));
+}
+
+const appPackage = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+appPackage.main = appMain;
+fs.writeFileSync(
+    path.join(stage, "package.json"),
+    JSON.stringify(appPackage, null, 2),
+);
+
+if (electronZipPath && electronZipPath !== "-") {
+  const electronDist = path.join(stage, "electron-dist");
+  fs.mkdirSync(electronDist, { recursive: true });
+  execSync(`unzip -o -q ${JSON.stringify(electronZipPath)} -d ${JSON.stringify(electronDist)}`, { stdio: "ignore" });
+}
+
 const runfilesNodeModules = path.join(runfilesRoot, "_main", "node_modules");
 if (fs.existsSync(runfilesNodeModules)) {
   fs.symlinkSync(runfilesNodeModules, path.join(stage, "node_modules"), "dir");

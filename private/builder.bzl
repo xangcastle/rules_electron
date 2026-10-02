@@ -56,9 +56,12 @@ def _electron_builder_impl(ctx):
             if d.endswith("/node_modules") and (nm_dir == None or len(d) < len(nm_dir)):
                 nm_dir = d
         args.add("--node_modules", nm_dir)
+        args.add("--seven_zip", nm_dir + "/7zip-bin")
 
     if ctx.attr.electron_cache and ctx.files.electron_cache:
         args.add("--electron_cache", ctx.files.electron_cache[0].path)
+
+    seven_zip_dir = None
 
     builder_cache_files = []
     for f in ctx.files.builder_cache:
@@ -91,6 +94,13 @@ def _electron_builder_impl(ctx):
         transitive = [ctx.attr.runner[DefaultInfo].default_runfiles.files],
     )
 
+    # mac targets (dmg/mas/pkg) mount and write a disk image volume and run
+    # the host signing tools: the sandbox is waived for them (still offline).
+    # linux and windows targets run fully sandboxed with the network blocked.
+    exec_requirements = {"block-network": "1"}
+    if ctx.attr.target in ["dmg", "mas", "mas-dev", "pkg"]:
+        exec_requirements["no-sandbox"] = "1"
+
     ctx.actions.run(
         executable = ctx.executable.runner,
         inputs = inputs,
@@ -98,7 +108,7 @@ def _electron_builder_impl(ctx):
         arguments = [args],
         mnemonic = "ElectronBuilder",
         progress_message = "Packaging Electron app (%{input})",
-        execution_requirements = {"block-network": "1"},
+        execution_requirements = exec_requirements,
         env = {"BAZEL_BINDIR": "."},
     )
 
