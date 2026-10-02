@@ -17,7 +17,8 @@ def _electron_dev_impl(ctx):
         sp = file.short_path
         return sp[3:] if sp.startswith("../") else sp
 
-    bundle_rels = [{"src": runfiles_rel(f), "dest": ctx.attr.bundle_dest} for f in ctx.files.bundles]
+    bundle_rels = [{"src": runfiles_rel(f), "dest": ctx.attr.bundle_dest} for f in ctx.files.bundles if f not in ctx.files.renderer]
+    renderer_rels = [{"src": runfiles_rel(f), "dest": ctx.attr.renderer_subdir} for f in ctx.files.renderer]
     electron_zip_rel = runfiles_rel(ctx.file.electron_zip) if ctx.attr.electron_zip else "-"
     native_addon_args = []
     for addon, pkg in ctx.attr.native_addons.items():
@@ -47,7 +48,7 @@ def _electron_dev_impl(ctx):
         output = manifest,
         content = json.encode({
             "app_main": ctx.attr.app_main,
-            "bundles": bundle_rels,
+            "bundles": bundle_rels + renderer_rels,
             "resources": resource_args,
             "packaged_modules": packaged_modules,
             "native_addons": native_addon_args,
@@ -71,6 +72,7 @@ def _electron_dev_impl(ctx):
     runfiles = ctx.runfiles(
         files = [ctx.file.package_json, ctx.file._driver, node, manifest] +
                 list(ctx.files.bundles) +
+                list(ctx.files.renderer) +
                 list(ctx.files.resources) +
                 [f for addon in ctx.attr.native_addons for f in addon[DefaultInfo].files.to_list()] +
                 ([ctx.file.electron_zip] if ctx.attr.electron_zip else []),
@@ -103,6 +105,14 @@ _electron_dev = rule(
         ),
         "env": attr.string_dict(
             doc = "Extra environment variables for the app.",
+        ),
+        "renderer": attr.label(
+            doc = "Optional renderer bundle staged at dist/<renderer_subdir>/ " +
+                  "instead of merging into the dist root.",
+        ),
+        "renderer_subdir": attr.string(
+            default = "renderer",
+            doc = "Stage subdirectory for the renderer bundle ('.' = dist root).",
         ),
         "bundle_dest": attr.string(
             default = "dist",
@@ -153,6 +163,8 @@ def electron_dev(
         native_addons = None,
         packaged_node_modules = None,
         bundle_dest = "dist",
+        renderer = None,
+        renderer_subdir = "renderer",
         app_main = "index.js",
         env = {},
         tags = [],
@@ -188,6 +200,8 @@ def electron_dev(
         bundles = bundles,
         electron_zip = electron_zip,
         bundle_dest = bundle_dest,
+        renderer = renderer,
+        renderer_subdir = renderer_subdir,
         native_addons = native_addons,
         packaged_node_modules = packaged_node_modules,
         env = env,
