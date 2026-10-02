@@ -168,7 +168,14 @@ def electron_app(
         bundles = bundle_labels + ([renderer] if renderer else []),
         electron_zip = _host_electron_zip(electron_cache),
         env = env,
+        native_addons = {
+            label: pkg
+            for arch, pkgs in (native_addons or {}).items()
+            for pkg, labels in pkgs.items()
+            for label in labels
+        },
         node_modules = [node_modules],
+        packaged_node_modules = packaged_node_modules,
         package_json = package_json,
         resources = resources,
         args = dev_args,

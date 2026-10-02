@@ -19,11 +19,25 @@ def _electron_dev_impl(ctx):
 
     bundle_rels = [{"src": runfiles_rel(f), "dest": "dist"} for f in ctx.files.bundles]
     electron_zip_rel = runfiles_rel(ctx.file.electron_zip) if ctx.attr.electron_zip else "-"
+    native_addon_args = []
+    for addon, pkg in ctx.attr.native_addons.items():
+        for f in addon[DefaultInfo].files.to_list():
+            native_addon_args.append({"pkg": pkg, "rel": runfiles_rel(f)})
+    packaged_modules = sorted(set(ctx.attr.packaged_node_modules +
+                                  [a["pkg"] for a in native_addon_args]))
     resource_args = []
+    resource_paths = []
     for f in ctx.files.resources:
         rel = runfiles_rel(f)
         dest = rel[len(ctx.label.package) + 1:] if ctx.label.package else rel
         resource_args.append({"src": rel, "dest": dest})
+        resource_paths.append(rel)
+
+    nm_dir = None
+    for f in ctx.files.node_modules:
+        d = f.dirname
+        if d.endswith("/node_modules") and (nm_dir == None or len(d) < len(nm_dir)):
+            nm_dir = d
 
     manifest = ctx.actions.declare_file(ctx.label.name + "_manifest.json")
     ctx.actions.write(
@@ -32,6 +46,9 @@ def _electron_dev_impl(ctx):
             "app_main": ctx.attr.app_main,
             "bundles": bundle_rels,
             "resources": resource_args,
+            "packaged_modules": packaged_modules,
+            "native_addons": native_addon_args,
+            "node_modules_root": nm_dir,
         }),
     )
 
@@ -41,13 +58,18 @@ def _electron_dev_impl(ctx):
         ctx.file._driver,
         runfiles = [manifest, ctx.file.package_json] +
                    ([ctx.file.electron_zip] if ctx.attr.electron_zip else []),
-        embedded_args = [],
+        embedded_args = [
+            str(len(bundle_rels)),
+            str(len(resource_args)),
+            ctx.attr.app_main,
+        ],
     )
 
     runfiles = ctx.runfiles(
         files = [ctx.file.package_json, ctx.file._driver, node, manifest] +
                 list(ctx.files.bundles) +
                 list(ctx.files.resources) +
+                [f for addon in ctx.attr.native_addons for f in addon[DefaultInfo].files.to_list()] +
                 ([ctx.file.electron_zip] if ctx.attr.electron_zip else []),
         transitive_files = depset(transitive = [
             dep[DefaultInfo].files
@@ -79,8 +101,16 @@ _electron_dev = rule(
         "env": attr.string_dict(
             doc = "Extra environment variables for the app.",
         ),
+        "native_addons": attr.label_keyed_string_dict(
+            doc = ".node files injected into the staged node_modules, keyed by " +
+                  "package name.",
+        ),
         "node_modules": attr.label_list(
             doc = "Linked node_modules targets symlinked into the stage (runtime deps).",
+        ),
+        "packaged_node_modules": attr.string_list(
+            doc = "npm package names copied as real dirs into the staged " +
+                  "node_modules (runtime requires the symlink cannot serve).",
         ),
         "resources": attr.label_list(
             allow_files = True,
@@ -110,6 +140,8 @@ def electron_dev(
         package_json,
         electron_zip = None,
         node_modules = [],
+        native_addons = None,
+        packaged_node_modules = None,
         app_main = "index.js",
         env = {},
         tags = [],
@@ -128,6 +160,10 @@ def electron_dev(
         electron_zip: Pinned Electron zip for the host platform; pass a
             select() across the electron_caches targets.
         node_modules: Linked node_modules targets symlinked into the stage.
+        native_addons: .node files injected into the staged node_modules,
+            keyed by package name.
+        packaged_node_modules: npm package names copied as real dirs into
+            the staged node_modules.
         app_main: Entry point under dist/ (informational; package.json main
             governs).
         env: Extra environment variables for the app.
@@ -140,6 +176,8 @@ def electron_dev(
         app_main = app_main,
         bundles = bundles,
         electron_zip = electron_zip,
+        native_addons = native_addons,
+        packaged_node_modules = packaged_node_modules,
         env = env,
         node_modules = node_modules,
         package_json = package_json,
