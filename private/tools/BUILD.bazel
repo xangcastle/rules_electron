@@ -1,0 +1,12 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+exports_files([
+    "dev_driver.mjs",
+    "packager.mjs",
+])
+
+js_library(
+    name = "packager_mjs",
+    srcs = ["packager.mjs"],
+    visibility = ["//visibility:public"],
+)

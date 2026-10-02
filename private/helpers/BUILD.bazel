@@ -1,0 +1,10 @@
+load("@aspect_bazel_lib//:bzl_library.bzl", "bzl_library")
+
+exports_files(["js_stub_binary.bzl"])
+
+bzl_library(
+    name = "js_stub_binary",
+    srcs = ["js_stub_binary.bzl"],
+    visibility = ["//visibility:public"],
+    deps = ["@hermetic_launcher//launcher:lib_bzl"],
+)

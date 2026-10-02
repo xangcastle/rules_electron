@@ -1,0 +1,10 @@
+{
+  "appId": "dev.xangcastle.electron",
+  "productName": "electron-e2e",
+  "files": ["dist/**/*"],
+  "asar": true,
+  "linux": {
+    "category": "Utility"
+  },
+  "artifactName": "electron-e2e-${arch}.${ext}"
+}

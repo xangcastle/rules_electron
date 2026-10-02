@@ -1,0 +1,5 @@
+bazel-*
+node_modules
+dist/
+.artifact/
+.DS_Store

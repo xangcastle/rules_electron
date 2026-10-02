@@ -1,0 +1,56 @@
+load("@aspect_bazel_lib//:bzl_library.bzl", "bzl_library")
+
+exports_files([
+    "addon.bzl",
+    "app.bzl",
+    "builder.bzl",
+    "caches.bzl",
+    "dev.bzl",
+    "tools.bzl",
+])
+
+bzl_library(
+    name = "addon",
+    srcs = ["addon.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "app",
+    srcs = ["app.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":addon",
+        ":builder",
+        ":dev",
+        "@aspect_rules_js//js:defs",
+    ],
+)
+
+bzl_library(
+    name = "builder",
+    srcs = ["builder.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "caches",
+    srcs = ["caches.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "dev",
+    srcs = ["dev.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//private/helpers:js_stub_binary",
+        "@hermetic_launcher//launcher:lib_bzl",
+    ],
+)
+
+bzl_library(
+    name = "tools",
+    srcs = ["tools.bzl"],
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,40 @@
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@rules_electron//:defs.bzl", "electron_app")
+
+npm_link_all_packages(name = "node_modules")
+
+electron_app(
+    name = "demo_app",
+    app_main = "dist/main.js",
+    archs = ["x64"],
+    builder_tools = "@electron_builder_tools",
+    bundles = {
+        "app": ":app_files",
+    },
+    electron_builder_config = "electron-builder.json",
+    electron_caches = {
+        "linux-arm64": "@electron_cache_v37_6_1_linux_arm64//:zip",
+        "linux-x64": "@electron_cache_v37_6_1_linux_x64//:zip",
+        "macos-arm64": "@electron_cache_v37_6_1_macos_arm64//:zip",
+        "macos-x64": "@electron_cache_v37_6_1_macos_x64//:zip",
+    },
+    env = {
+        "NODE_ENV": "production",
+        "DEBUG": "electron-builder,electron-builder:*",
+    },
+    node_modules = ":node_modules",
+    package_json = "package.json",
+    targets = [
+        "tar.gz",
+        "appimage",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "app_files",
+    srcs = [
+        "index.html",
+        "main.js",
+    ],
+)

@@ -1,0 +1,17 @@
+{
+  "name": "electron-e2e",
+  "private": true,
+  "main": "dist/main.js",
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "37.6.1",
+    "electron-builder": "26.7.0",
+    "7zip-bin": "5.2.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": []
+  },
+  "version": "0.1.0",
+  "description": "rules_electron end-to-end app",
+  "author": "xangcastle"
+}
