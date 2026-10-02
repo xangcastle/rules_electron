@@ -115,7 +115,13 @@ for (const entry of resourceRels) {
 }
 
 const appPackage = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-appPackage.main = appMain;
+// Bundled mains live under dist/ (the merged bundle stage); plain-JS mains
+// staged via resources live at the stage root. Try both.
+if (!fs.existsSync(path.join(stage, appMain))) {
+  appPackage.main = path.join("dist", appMain);
+} else {
+  appPackage.main = appMain;
+}
 fs.writeFileSync(
     path.join(stage, "package.json"),
     JSON.stringify(appPackage, null, 2),
