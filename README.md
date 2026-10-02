@@ -64,9 +64,9 @@ builder_tools.builder()
 use_repo(builder_tools, "electron_builder_tools")
 
 caches = use_extension("@rules_electron//:extensions.bzl", "electron_caches")
-caches.cache(version = "37.6.1", platforms = ["linux-x64", "macos-arm64"])
-use_repo(caches, "electron_cache_v37_6_1_linux_x64")
-use_repo(caches, "electron_cache_v37_6_1_macos_arm64")
+# The Electron version comes from this package.json's electron dependency.
+caches.cache(package_json = "//:package.json", platforms = {"linux": ["x64"], "macos": ["arm64"]})
+use_repo(caches, "electron_cache_v37_6_1")
 ```
 
 ```starlark
@@ -77,10 +77,7 @@ electron_app(
     node_modules = ":node_modules",
     package_json = "package.json",
     electron_builder_config = "electron-builder.json",
-    electron_caches = {
-        "linux-x64": "@electron_cache_v37_6_1_linux_x64//:zip",
-        "macos-arm64": "@electron_cache_v37_6_1_macos_arm64//:zip",
-    },
+    electron_cache = "@electron_cache_v37_6_1",
     builder_tools = "@electron_builder_tools",
     targets = ["tar.gz", "appimage", "dmg"],
     archs = ["x64", "arm64"],
