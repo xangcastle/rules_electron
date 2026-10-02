@@ -169,8 +169,11 @@ def electron_app(
     _electron_dev(
         name = app_name + ".dev",
         app_main = app_main,
-        bundles = bundle_labels + ([renderer] if renderer else []),
+        bundle_dest = dev_bundle_dest,
+        bundles = [b for b in bundle_labels if b != renderer],
         electron_zip = _host_electron_zip(electron_cache),
+        renderer = renderer or None,
+        renderer_subdir = renderer_subdir,
         env = env,
         native_addons = {
             label: pkg
