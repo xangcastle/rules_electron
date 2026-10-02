@@ -12,7 +12,7 @@ Creates the standard target family for one app:
 The app's bundles are inputs, not generated here: webpack (aspect_rules_webpack),
 vite (rules_vite) or plain filegroups all work — whatever produces the dist
 layout is the consumer's choice. The hermeticity inputs come from the
-electron_caches (Electron binary + node headers) and builder_tools (packaging
+electron_cache (Electron binary) and builder_tools (packaging
 toolsets) module extensions, both shipped by this ruleset.
 """
 
@@ -49,24 +49,18 @@ def _tool_labels(required_tools, builder_tools):
             labels.append(builder_tools + "//:" + tool)
     return labels
 
-def _host_electron_zip(electron_caches):
-    """A select() over the host OS picking the pinned Electron zip, or None."""
-    if not electron_caches:
+def _host_electron_zip(electron_cache):
+    """A select() over the host OS picking the cached Electron zip, or None."""
+    if not electron_cache:
         return None
     branches = {}
-    for os_label, keys in [
-        ("@platforms//os:linux", ["linux-x64", "linux-arm64"]),
-        ("@platforms//os:macos", ["macos-arm64", "macos-x64"]),
-        ("@platforms//os:windows", ["windows-x64", "windows-arm64"]),
+    for os_label, key in [
+        ("@platforms//os:linux", "zip_linux_x64"),
+        ("@platforms//os:macos", "zip_macos_arm64"),
+        ("@platforms//os:windows", "zip_windows_x64"),
     ]:
-        for key in keys:
-            if key in electron_caches:
-                branches[os_label] = electron_caches[key]
-                break
-    if not branches:
-        return None
-    fallback = branches.get("@platforms//os:linux") or branches.get("@platforms//os:macos") or list(branches.values())[0]
-    branches["//conditions:default"] = fallback
+        branches[os_label] = electron_cache + "//:" + key
+    branches["//conditions:default"] = electron_cache + "//:zip_linux_x64"
     return select(branches)
 
 def electron_app(
@@ -85,7 +79,7 @@ def electron_app(
         env = None,
         targets = None,
         archs = None,
-        electron_caches = None,
+        electron_cache = None,
         builder_tools = None,
         packaged_node_modules = None,
         dev_args = None,
@@ -121,11 +115,11 @@ def electron_app(
         targets: electron-builder targets (e.g. tar.gz, appimage, deb, nsis,
             dmg, mas). Default: ['tar.gz'].
         archs: Architectures (default ['x64']).
-        electron_caches: Dict platform-arch -> pinned Electron zip label
-            (electron_caches extension), e.g. {"linux-x64":
-            "@electron_cache_v37_6_1_linux_x64//:zip"}. Packaging never
-            downloads the Electron binary when provided; the dev target
-            requires the host platform entry.
+        electron_cache: Repository name of the Electron zip cache from the
+            electron_caches extension (e.g. "@electron_cache_v37_6_1",
+            with the version derived from this app's package.json).
+            Packaging never downloads the Electron binary when provided;
+            the dev target requires it for the host platform.
         builder_tools: Repository name of the packaging toolset cache
             ("@electron_builder_tools", from the builder_tools extension).
             Required for appimage/dmg/nsis targets.
@@ -159,8 +153,8 @@ def electron_app(
         archs = ["x64"]
     if env == None:
         env = {"NODE_ENV": "production"}
-    if electron_caches == None:
-        electron_caches = {}
+    if electron_cache == None:
+        electron_cache = None
     if packaged_node_modules == None:
         packaged_node_modules = []
     if dev_args == None:
@@ -172,7 +166,7 @@ def electron_app(
         name = app_name + ".dev",
         app_main = app_main,
         bundles = bundle_labels + ([renderer] if renderer else []),
-        electron_zip = _host_electron_zip(electron_caches),
+        electron_zip = _host_electron_zip(electron_cache),
         env = env,
         node_modules = [node_modules],
         package_json = package_json,
@@ -242,9 +236,8 @@ def electron_app(
                         for pkg, labels in addons.items()
                         for label in labels
                     }
-            cache_key_label = electron_caches.get(cache_key)
-            if cache_key_label:
-                builder_kwargs["electron_cache"] = cache_key_label
+            if electron_cache:
+                builder_kwargs["electron_cache"] = electron_cache + "//:zip_" + cache_key.replace("-", "_")
             if required_tools:
                 builder_kwargs["builder_cache"] = _tool_labels(required_tools, builder_tools)
             _electron_builder(

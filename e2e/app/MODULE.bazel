@@ -32,15 +32,10 @@ use_repo(builder_tools, "electron_builder_tools")
 
 caches = use_extension("@rules_electron//:extensions.bzl", "electron_caches")
 caches.cache(
-    platforms = [
-        "linux-x64",
-        "linux-arm64",
-        "macos-arm64",
-        "macos-x64",
-    ],
-    version = "37.6.1",
+    package_json = "//:package.json",
+    platforms = {
+        "linux": ["x64", "arm64"],
+        "macos": ["arm64", "x64"],
+    },
 )
-use_repo(caches, "electron_cache_v37_6_1_linux_x64")
-use_repo(caches, "electron_cache_v37_6_1_linux_arm64")
-use_repo(caches, "electron_cache_v37_6_1_macos_arm64")
-use_repo(caches, "electron_cache_v37_6_1_macos_x64")
+use_repo(caches, "electron_cache_v37_6_1")

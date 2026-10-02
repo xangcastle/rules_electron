@@ -12,12 +12,7 @@ electron_app(
         "app": ":app_files",
     },
     electron_builder_config = "electron-builder.json",
-    electron_caches = {
-        "linux-arm64": "@electron_cache_v37_6_1_linux_arm64//:zip",
-        "linux-x64": "@electron_cache_v37_6_1_linux_x64//:zip",
-        "macos-arm64": "@electron_cache_v37_6_1_macos_arm64//:zip",
-        "macos-x64": "@electron_cache_v37_6_1_macos_x64//:zip",
-    },
+    electron_cache = "@electron_cache_v37_6_1",
     env = {
         "NODE_ENV": "production",
         "DEBUG": "electron-builder,electron-builder:*",

@@ -266,7 +266,7 @@
     },
     "@@rules_electron+//:extensions.bzl%builder_tools": {
       "general": {
-        "bzlTransitiveDigest": "UrkrlOlc2XIp8PVeA+QuBqx9/lHFBCK5f3RwFqBYNoA=",
+        "bzlTransitiveDigest": "JtnEOgVqD+r6bxDMC3AVdwkCErBqxzf9GbVrLfUg5jI=",
         "usagesDigest": "3VDyS0KR1iEYh4qz2DJxtaHWRsHg9ymZ89QXTFXA2To=",
         "recordedInputs": [],
         "generatedRepoSpecs": {
@@ -279,36 +279,28 @@
     },
     "@@rules_electron+//:extensions.bzl%electron_caches": {
       "general": {
-        "bzlTransitiveDigest": "UrkrlOlc2XIp8PVeA+QuBqx9/lHFBCK5f3RwFqBYNoA=",
-        "usagesDigest": "Ic1pTBFsWzqUWn78g2ChfNK5RvxwlR1CACbHhHyBQTQ=",
-        "recordedInputs": [],
+        "bzlTransitiveDigest": "JtnEOgVqD+r6bxDMC3AVdwkCErBqxzf9GbVrLfUg5jI=",
+        "usagesDigest": "u61LXRdZFo1dT9I4DyMCpxuX3o63Wxe53rnIjJJAS9E=",
+        "recordedInputs": [
+          "FILE:@@//package.json 9e73bca9e8085a08f2859a3df1ec2130f8b9a2c686cf1c3c81965b573ff64677"
+        ],
         "generatedRepoSpecs": {
-          "electron_cache_v37_6_1_linux_x64": {
-            "repoRuleId": "@@rules_electron+//private:caches.bzl%_electron_cache",
+          "electron_cache_v37_6_1": {
+            "repoRuleId": "@@rules_electron+//private:caches.bzl%_electron_cache_repo",
             "attributes": {
-              "platform_arch": "linux-x64",
-              "version": "37.6.1"
-            }
-          },
-          "electron_cache_v37_6_1_linux_arm64": {
-            "repoRuleId": "@@rules_electron+//private:caches.bzl%_electron_cache",
-            "attributes": {
-              "platform_arch": "linux-arm64",
-              "version": "37.6.1"
-            }
-          },
-          "electron_cache_v37_6_1_macos_arm64": {
-            "repoRuleId": "@@rules_electron+//private:caches.bzl%_electron_cache",
-            "attributes": {
-              "platform_arch": "macos-arm64",
-              "version": "37.6.1"
-            }
-          },
-          "electron_cache_v37_6_1_macos_x64": {
-            "repoRuleId": "@@rules_electron+//private:caches.bzl%_electron_cache",
-            "attributes": {
-              "platform_arch": "macos-x64",
-              "version": "37.6.1"
+              "platforms": {
+                "linux": [
+                  "x64",
+                  "arm64"
+                ],
+                "macos": [
+                  "arm64",
+                  "x64"
+                ]
+              },
+              "version": "37.6.1",
+              "mirror": "https://github.com/electron/electron/releases/download",
+              "shasums_sha256": ""
             }
           }
         }
