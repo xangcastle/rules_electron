@@ -83,6 +83,7 @@ def electron_app(
         builder_tools = None,
         packaged_node_modules = None,
         dev_args = None,
+        dev_bundle_dest = "dist",
         native_addons = None,
         visibility = None,
         **kwargs):
@@ -127,6 +128,9 @@ def electron_app(
             package's node_modules (runtime requires the files matcher would
             drop, e.g. native-addon helpers).
         dev_args: Extra args for the dev target (passed to electron).
+        dev_bundle_dest: Stage directory the dev bundles merge into; "." is
+            the asar-root layout apps whose electron-builder config remaps
+            dist to the package root ship with.
         native_addons: Dict arch -> {npm package name: [node_addon targets]}.
             Only macOS targets consume addons.
         visibility: Standard visibility (None = package default).

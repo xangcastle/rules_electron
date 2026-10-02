@@ -17,7 +17,7 @@ def _electron_dev_impl(ctx):
         sp = file.short_path
         return sp[3:] if sp.startswith("../") else sp
 
-    bundle_rels = [{"src": runfiles_rel(f), "dest": "dist"} for f in ctx.files.bundles]
+    bundle_rels = [{"src": runfiles_rel(f), "dest": ctx.attr.bundle_dest} for f in ctx.files.bundles]
     electron_zip_rel = runfiles_rel(ctx.file.electron_zip) if ctx.attr.electron_zip else "-"
     native_addon_args = []
     for addon, pkg in ctx.attr.native_addons.items():
@@ -38,6 +38,9 @@ def _electron_dev_impl(ctx):
         d = f.dirname
         if d.endswith("/node_modules") and (nm_dir == None or len(d) < len(nm_dir)):
             nm_dir = d
+    if nm_dir == None:
+        fail("electron_dev(%s): node_modules target exposes no files; pass " % ctx.label.name +
+             "the app's npm_link_all_packages target.")
 
     manifest = ctx.actions.declare_file(ctx.label.name + "_manifest.json")
     ctx.actions.write(
@@ -101,6 +104,13 @@ _electron_dev = rule(
         "env": attr.string_dict(
             doc = "Extra environment variables for the app.",
         ),
+        "bundle_dest": attr.string(
+            default = "dist",
+            doc = "Stage directory the bundles merge into. \".\" merges them " +
+                  "at the stage root (the asar-root layout apps whose " +
+                  "electron-builder config remaps dist to the package root " +
+                  "ship with).",
+        ),
         "native_addons": attr.label_keyed_string_dict(
             doc = ".node files injected into the staged node_modules, keyed by " +
                   "package name.",
@@ -142,6 +152,7 @@ def electron_dev(
         node_modules = [],
         native_addons = None,
         packaged_node_modules = None,
+        bundle_dest = "dist",
         app_main = "index.js",
         env = {},
         tags = [],
@@ -176,6 +187,7 @@ def electron_dev(
         app_main = app_main,
         bundles = bundles,
         electron_zip = electron_zip,
+        bundle_dest = bundle_dest,
         native_addons = native_addons,
         packaged_node_modules = packaged_node_modules,
         env = env,
