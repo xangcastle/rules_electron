@@ -18,7 +18,7 @@ def _electron_dev_impl(ctx):
         return sp[3:] if sp.startswith("../") else sp
 
     bundle_rels = [{"src": runfiles_rel(f), "dest": ctx.attr.bundle_dest} for f in ctx.files.bundles if f not in ctx.files.renderer]
-    renderer_rels = [{"src": runfiles_rel(f), "dest": ctx.attr.renderer_subdir} for f in ctx.files.renderer]
+    renderer_rels = [{"src": runfiles_rel(f), "dest": (ctx.attr.bundle_dest.rstrip("/") + "/" + ctx.attr.renderer_subdir.lstrip("/")).replace("/./", "/")} for f in ctx.files.renderer]
     electron_zip_rel = runfiles_rel(ctx.file.electron_zip) if ctx.attr.electron_zip else "-"
     native_addon_args = []
     for addon, pkg in ctx.attr.native_addons.items():

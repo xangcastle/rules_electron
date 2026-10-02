@@ -142,11 +142,9 @@ for (const entry of spec.resources) {
 }
 
 const appPackage = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
-if (fs.existsSync(path.join(stage, appMain))) {
-  appPackage.main = appMain;
-} else {
-  appPackage.main = path.join("dist", appMain);
-}
+// Same resolution electron-builder does at package time: app files keep
+// their project-relative paths; main is the project-relative entry.
+appPackage.main = appMain;
 fs.writeFileSync(
     path.join(stage, "package.json"),
     JSON.stringify(appPackage, null, 2),
@@ -191,8 +189,10 @@ const resolveLinked = (name) => {
 for (const name of packagedModules) {
   const source = resolveLinked(name);
   if (!source) {
-    console.error("dev_driver: packaged module " + name + " not found in the linked node_modules");
-    process.exit(2);
+    // Best effort: the wrapper lists runtime requires that may not exist
+    // for every app (e.g. windows-focus-assist on a mac-only checkout).
+    console.warn("dev_driver: packaged module " + name + " not in the linked tree; skipping");
+    continue;
   }
   const real = path.join(stage, "node_modules_real", name);
   fs.mkdirSync(path.dirname(real), { recursive: true });
