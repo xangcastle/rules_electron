@@ -22,11 +22,35 @@ and fetched by Bazel instead:
   `builder_tools` extension (electron-builder-binaries releases; the dmgbuild
   hashes are the ones electron-builder itself embeds).
 
-The packaging action declares `block-network` and redirects `HOME` into the
-staging area: a missing toolset fails the build naming it, and nothing
-touches the developer's profile. Remaining platform requirements (offline,
-host-provided): macOS signing/productbuild for mas/pkg, and Wine for
-Windows icon stamping from Linux/macOS.
+Linux and Windows packaging actions run sandboxed with `block-network`:
+`HOME`/`XDG` are redirected into the staging area, a missing toolset fails
+the build naming it, and a post-run receipt fails the build if anything
+wrote to the redirected profile.
+
+macOS `dmg`/`mas`/`pkg` targets mount and write a disk image volume and run
+the host signing/productbuild tools, so they WAIVE the sandbox — they stay
+offline (`block-network` still enforced) and keep the HOME redirection.
+
+Remaining platform requirements (offline, host-provided): macOS signing
+identities for signed mas/pkg builds, and Wine for Windows icon stamping
+from Linux/macOS (disabled by default; `ELECTRON_BUILDER_WINE=1` re-enables
+it on runners that have Wine).
+
+## Dev target
+
+`bazel run //:my_app.dev` stages the bundles into `dist/`, the `resources`
+at their package-relative paths, rewrites the staged `package.json` `main`
+to `app_main`, extracts the pinned Electron zip for the HOST platform (pass
+the host entry of `electron_caches` via a `select()`), symlinks the linked
+`node_modules`, and launches the app. Stdio is inherited; Ctrl+C reaches
+the app. The stage is removed on exit.
+
+Requirements:
+
+- `electron_caches` must include the host platform's entry (the dev target
+  picks it with a `select()` on OS).
+- `7zip-bin` must be a dependency of the app (the packager and the dev
+  launcher use `7za` to extract the pinned toolsets).
 
 ## Quickstart
 
