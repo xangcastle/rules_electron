@@ -134,7 +134,16 @@ function stageInto(source, destination) {
 }
 
 for (const entry of spec.bundles) {
-  stageInto(resolveInput(entry.src), path.join(stage, entry.dest));
+  const source = resolveInput(entry.src);
+  const destination = path.join(stage, entry.dest);
+  const stat = fs.statSync(source);
+  if (stat.isDirectory()) {
+    copyDirContents(source, destination);
+  } else {
+    // Loose files (filegroup bundles) land at the dest root.
+    fs.mkdirSync(destination, { recursive: true });
+    fs.copyFileSync(source, path.join(destination, path.basename(source)));
+  }
 }
 
 for (const entry of spec.resources) {
