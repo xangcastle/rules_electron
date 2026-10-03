@@ -1,5 +1,5 @@
 load("@npm//:defs.bzl", "npm_link_all_packages")
-load("@rules_electron//:defs.bzl", "electron_app")
+load("@rules_electron//:defs.bzl", "electron_app", "electron_dev")
 
 npm_link_all_packages(name = "node_modules")
 
@@ -32,4 +32,18 @@ filegroup(
         "index.html",
         "main.js",
     ],
+)
+
+electron_dev(
+    name = "app.dev",
+    app_main = "dist/main.js",
+    bundles = [":app_files"],
+    electron_zip = select({
+        "@platforms//os:linux": "@electron_cache_v37_6_1//:zip_linux_x64",
+        "@platforms//os:macos": "@electron_cache_v37_6_1//:zip_macos_arm64",
+        "//conditions:default": "@electron_cache_v37_6_1//:zip_macos_x64",
+    }),
+    node_modules = [":node_modules"],
+    package_json = "package.json",
+    visibility = ["//visibility:public"],
 )
