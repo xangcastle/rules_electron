@@ -37,16 +37,18 @@ _TARGET_TOOLS = {
     "appx": ["win_code_sign"],
 }
 
+_TOOLS_RUNNING_ON_THE_HOST_FOR_ANY_TARGET_ARCH = {
+    "dmgbuild": ["dmgbuild_arm64", "dmgbuild_x86_64"],
+}
+
 def _tool_labels(required_tools, builder_tools):
+    """One builder_tools label per required tool; tools that run on the host
+    for any target arch (dmgbuild assembles the DMG there) expand to one
+    label per host bundle."""
     labels = []
     for tool in required_tools:
-        if tool == "dmgbuild":
-            # The dmgbuild/python tooling runs on the HOST to assemble the DMG
-            # for any target arch: both host bundles are required.
-            labels.append(builder_tools + "//:dmgbuild_arm64")
-            labels.append(builder_tools + "//:dmgbuild_x86_64")
-        else:
-            labels.append(builder_tools + "//:" + tool)
+        for host_bundle in _TOOLS_RUNNING_ON_THE_HOST_FOR_ANY_TARGET_ARCH.get(tool, [tool]):
+            labels.append(builder_tools + "//:" + host_bundle)
     return labels
 
 def _host_electron_zip(electron_cache):
@@ -145,7 +147,6 @@ def electron_app(
     if runner_tools == None:
         runner_tools = ["electron-builder", "7zip-bin"]
     if "7zip-bin" not in runner_tools:
-        # Required to extract the pinned packaging toolsets.
         runner_tools.append("7zip-bin")
     if scripts == None:
         scripts = []

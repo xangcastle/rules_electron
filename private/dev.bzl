@@ -1,6 +1,13 @@
 """Electron dev target: launches the app against pre-built bundles.
 
-The executable is a compiled native stub running node on a driver script.
+The executable is a compiled native stub running node on a driver script
+with the fixed argv [manifest, package.json, electron zip or '-', bundle
+count, resource count, app_main] followed by the bazel run passthrough.
+The driver reads everything else from the manifest (bundles and resources
+as {src, dest} entries, packaged module names, native addon files, the
+execroot-relative node_modules root): the stub's argument ceiling bounds
+the argv, not the manifest.
+
 The driver stages the bundles into an ephemeral dist/ layout, extracts the
 pinned Electron zip (electron_caches), symlinks the linked node_modules, and
 executes the Electron binary with stdio inherited and signals forwarded.

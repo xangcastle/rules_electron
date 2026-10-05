@@ -20,6 +20,17 @@ Output: a TreeArtifact holding the produced artifacts (.deb, .tar.gz,
 .appimage, .dmg, ...).
 """
 
+_TARGETS_MOUNTING_A_DISK_IMAGE_VOLUME = ["dmg", "mas", "mas-dev", "pkg"]
+
+def _electron_builder_cache_layout(tool_file):
+    """The release-relative layout the packager mirrors into
+    ELECTRON_BUILDER_CACHE: the short_path after the canonical repository
+    segment (../<canonical>/<release>/<filename>)."""
+    short_path = tool_file.short_path
+    if short_path.startswith("../"):
+        return short_path.split("/", 2)[2]
+    return short_path
+
 def _electron_builder_impl(ctx):
     out_dir = ctx.actions.declare_directory(ctx.attr.name)
 
@@ -61,17 +72,9 @@ def _electron_builder_impl(ctx):
     if ctx.attr.electron_cache and ctx.files.electron_cache:
         args.add("--electron_cache", ctx.files.electron_cache[0].path)
 
-    seven_zip_dir = None
-
     builder_cache_files = []
     for f in ctx.files.builder_cache:
-        # short_path for the external tools repository is
-        # ../<canonical>/<release>/<filename>; the layout after the canonical
-        # segment is what the packager mirrors into ELECTRON_BUILDER_CACHE.
-        sp = f.short_path
-        if sp.startswith("../"):
-            sp = sp.split("/", 2)[2]
-        args.add("--builder_tool=%s=%s" % (sp, f.path))
+        args.add("--builder_tool=%s=%s" % (_electron_builder_cache_layout(f), f.path))
         builder_cache_files.append(f)
 
     for m in ctx.attr.packaged_node_modules:
@@ -94,11 +97,8 @@ def _electron_builder_impl(ctx):
         transitive = [ctx.attr.runner[DefaultInfo].default_runfiles.files],
     )
 
-    # mac targets (dmg/mas/pkg) mount and write a disk image volume and run
-    # the host signing tools: the sandbox is waived for them (still offline).
-    # linux and windows targets run fully sandboxed with the network blocked.
     exec_requirements = {"block-network": "1"}
-    if ctx.attr.target in ["dmg", "mas", "mas-dev", "pkg"]:
+    if ctx.attr.target in _TARGETS_MOUNTING_A_DISK_IMAGE_VOLUME:
         exec_requirements["no-sandbox"] = "1"
 
     ctx.actions.run(
