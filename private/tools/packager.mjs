@@ -73,6 +73,46 @@ function hashUrlSafe(input, length = 6) {
   return out.length >= length ? out.slice(0, length) : out.padStart(length, "0");
 }
 
+// builder-util's getPath7za chmods the 7zip-bin binaries unconditionally
+// before every use, and the npm store it resolves from is a read-only
+// action input on linux sandboxes (EROFS). Copies land inside the stage
+// and the 7zip-bin module is aliased to them, so electron-builder only
+// ever chmods writable files.
+function stageSevenZipBin(stage) {
+  const builderRequire = createRequire(require.resolve("electron-builder/package.json"));
+  let resolved;
+  let bin;
+  try {
+    resolved = builderRequire.resolve("7zip-bin");
+    bin = require(resolved);
+  } catch (e) {
+    console.error("packager: 7zip-bin not resolvable from electron-builder: " + e.message);
+    process.exit(2);
+  }
+  const patched = {};
+  for (const [key, source] of Object.entries(bin)) {
+    if (typeof source !== "string" || !fs.existsSync(source)) {
+      patched[key] = source;
+      continue;
+    }
+    const copy = path.join(stage, "7zip-bin", key, path.basename(source));
+    fs.mkdirSync(path.dirname(copy), { recursive: true });
+    fs.copyFileSync(source, copy);
+    fs.chmodSync(copy, 0o755);
+    patched[key] = copy;
+  }
+  const fake = new (require("module").Module)(resolved, null);
+  fake.exports = patched;
+  fake.loaded = true;
+  for (const id of new Set([resolved, fs.realpathSync(resolved)])) {
+    require.cache[id] = fake;
+  }
+  if (builderRequire("7zip-bin").path7za !== patched.path7za) {
+    console.error("packager: the 7zip-bin alias did not take; electron-builder would chmod the read-only store copy");
+    process.exit(2);
+  }
+}
+
 function stageBuilderCache(builderCacheFiles, stage, homeDir, sevenZipRoot) {
   const cacheDir = path.join(stage, "eb-cache");
   fs.mkdirSync(cacheDir, { recursive: true });
@@ -322,6 +362,7 @@ async function main() {
     for (const [k, v] of Object.entries(extra)) process.env[k] = String(v);
   }
 
+  stageSevenZipBin(stage);
   process.chdir(stage);
   const { build, Platform, Arch } = require("electron-builder");
   const rawConfig = JSON.parse(
