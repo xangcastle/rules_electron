@@ -153,11 +153,11 @@ function stageDefaultPlatformIconCopyWhenUnset(stage, platKey, config) {
   platConfig.icon = copy;
 }
 
-function stageDmgBuildJsToolCacheEntry(cacheDir, toolRootName, fileName, sourceArchivePath) {
+function stageDmgBuildJsToolCacheEntry(cacheDir, releaseName, fileName, sourceArchivePath) {
   const baseUrl = "https://github.com/electron-userland/electron-builder-binaries/releases/download/";
-  const suffix = electronBuilderDjb2UrlHashBase36(`${baseUrl}-${toolRootName}-${fileName}`, 5);
+  const suffix = electronBuilderDjb2UrlHashBase36(`${baseUrl}-${releaseName}-${fileName}`, 5);
   const folderName = fileName.replace(/\.(tar\.gz|tgz)$/, "") + "-" + suffix;
-  const extractDir = path.join(cacheDir, toolRootName, folderName);
+  const extractDir = path.join(cacheDir, releaseName, folderName);
   fs.mkdirSync(extractDir, { recursive: true });
   execSync(
       `tar -xzf ${JSON.stringify(path.resolve(sourceArchivePath))} -C ${JSON.stringify(extractDir)} --strip-components 1`,
@@ -166,23 +166,71 @@ function stageDmgBuildJsToolCacheEntry(cacheDir, toolRootName, fileName, sourceA
   fs.writeFileSync(extractDir + ".complete", "");
 }
 
-function stageAppBuilderGoToolCacheEntry(cacheDir, toolRootName, fileName, sourceArchivePath, sevenZipRoot) {
-  const toolDir = path.join(cacheDir, toolRootName);
-  const archiveCopy = path.join(toolDir, fileName);
-  fs.mkdirSync(toolDir, { recursive: true });
-  fs.copyFileSync(sourceArchivePath, archiveCopy);
-  const releaseName = fileName.replace(/\.(7z|tar\.gz|tgz)$/i, "");
-  const extracted = path.join(toolDir, releaseName);
-  const extractionTmp = path.join(toolDir, ".extract-" + releaseName);
-  extractArchive(archiveCopy, extractionTmp, sevenZipRoot);
+const TOOLSET_GETBIN_DIRECT_NAMES = {"winCodeSign-2.6.0": "winCodeSign"};
+
+function appBuilderDownloadArtifactName(releaseName, fileName) {
+  return TOOLSET_GETBIN_DIRECT_NAMES[releaseName] ??
+      `${releaseName}-${fileName.replace(/\.[^.]+$/, "")}`;
+}
+
+function stageAppBuilderDownloadArtifactCacheEntry(cacheDir, releaseName, fileName, sourceArchivePath, sevenZipRoot) {
+  const downloadArtifactName = appBuilderDownloadArtifactName(releaseName, fileName);
+  const releaseDir = path.join(cacheDir, downloadArtifactName.split("-")[0], downloadArtifactName);
+  stageExtractedToolsetCacheEntry(cacheDir, releaseDir, fileName, sourceArchivePath, sevenZipRoot);
+  return releaseDir;
+}
+
+function stageAppBuilderGoToolCacheEntry(cacheDir, releaseName, fileName, sourceArchivePath, sevenZipRoot) {
+  stageExtractedToolsetCacheEntry(
+      cacheDir,
+      path.join(cacheDir, releaseName.split("-")[0], releaseName),
+      fileName,
+      sourceArchivePath,
+      sevenZipRoot,
+  );
+}
+
+function isMakensisToolset(releaseName) {
+  return /^nsis-\d/.test(releaseName);
+}
+
+function prepareMakensisForTheHost(makensisToolsetDir) {
+  process.env.NSISDIR = makensisToolsetDir;
+  if (process.platform !== "darwin") {
+    return;
+  }
+  const macDir = path.join(makensisToolsetDir, "mac");
+  for (const entry of fs.readdirSync(macDir, { withFileTypes: true })) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    const macExecutable = path.join(macDir, entry.name);
+    fs.chmodSync(macExecutable, 0o755);
+    try {
+      execSync(`codesign --force --sign - ${JSON.stringify(macExecutable)}`, { stdio: "ignore" });
+    } catch (e) {}
+  }
+}
+
+function stageExtractedToolsetCacheEntry(cacheDir, releaseDir, fileName, sourceArchivePath, sevenZipRoot) {
+  fs.mkdirSync(releaseDir, { recursive: true });
+  const extractionTmp = path.join(cacheDir, ".extract-" + fileName);
+  extractArchive(sourceArchivePath, extractionTmp, sevenZipRoot);
   const entries = fs.readdirSync(extractionTmp);
   if (entries.length === 1 && fs.statSync(path.join(extractionTmp, entries[0])).isDirectory()) {
-    fs.renameSync(path.join(extractionTmp, entries[0]), extracted);
+    fs.renameSync(path.join(extractionTmp, entries[0]), releaseDir);
     fs.rmSync(extractionTmp, { recursive: true, force: true });
   } else {
-    fs.renameSync(extractionTmp, extracted);
+    fs.renameSync(extractionTmp, releaseDir);
   }
-  fs.writeFileSync(extracted + ".complete", "");
+}
+
+function isAppBuilderGoDownloaderToolset(releaseName) {
+  return releaseName.startsWith("appimage");
+}
+
+function isDmgBuilderJsDownloadToolset(releaseName) {
+  return releaseName.startsWith("dmg-builder@");
 }
 
 function stageBuilderToolCache(builderCacheFiles, stage, homeDir, sevenZipRoot) {
@@ -190,12 +238,17 @@ function stageBuilderToolCache(builderCacheFiles, stage, homeDir, sevenZipRoot) 
   fs.mkdirSync(cacheDir, { recursive: true });
 
   for (const [relativeLayout, source] of Object.entries(builderCacheFiles)) {
-    const toolRootName = relativeLayout.split("/")[0];
+    const releaseName = relativeLayout.split("/")[0];
     const fileName = path.basename(relativeLayout);
-    if (toolRootName.startsWith("dmg-builder@")) {
-      stageDmgBuildJsToolCacheEntry(cacheDir, toolRootName, fileName, source);
+    if (isAppBuilderGoDownloaderToolset(releaseName)) {
+      stageAppBuilderGoToolCacheEntry(cacheDir, releaseName, fileName, source, sevenZipRoot);
+    } else if (isDmgBuilderJsDownloadToolset(releaseName)) {
+      stageDmgBuildJsToolCacheEntry(cacheDir, releaseName, fileName, source);
     } else {
-      stageAppBuilderGoToolCacheEntry(cacheDir, toolRootName, fileName, source, sevenZipRoot);
+      const releaseDir = stageAppBuilderDownloadArtifactCacheEntry(cacheDir, releaseName, fileName, source, sevenZipRoot);
+      if (isMakensisToolset(releaseName)) {
+        prepareMakensisForTheHost(releaseDir);
+      }
     }
   }
 

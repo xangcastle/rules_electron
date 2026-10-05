@@ -25,7 +25,8 @@ _TARGETS_MOUNTING_A_DISK_IMAGE_VOLUME = ["dmg", "mas", "mas-dev", "pkg"]
 def _electron_builder_cache_layout(tool_file):
     """The release-relative layout the packager mirrors into
     ELECTRON_BUILDER_CACHE: the short_path after the canonical repository
-    segment (../<canonical>/<release>/<filename>)."""
+    segment (../<canonical>/<release>/<filename>), where <release> is the
+    electron-builder releaseName of the toolset."""
     short_path = tool_file.short_path
     if short_path.startswith("../"):
         return short_path.split("/", 2)[2]
