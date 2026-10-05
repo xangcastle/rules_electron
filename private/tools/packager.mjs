@@ -76,19 +76,21 @@ function hashUrlSafe(input, length = 6) {
 // builder-util's getPath7za chmods the 7zip-bin binaries unconditionally
 // before every use, and the npm store it resolves from is a read-only
 // action input on linux sandboxes (EROFS). Copies land inside the stage
-// and the 7zip-bin module is aliased to them, so electron-builder only
-// ever chmods writable files.
+// and every 7zip-bin resolution anchor electron-builder uses is aliased
+// to them: builder-util resolves the module from its own package root,
+// which does not coincide with electron-builder's for every version
+// (26.4.1 vs 26.7.0 differ and both ship in this workspace).
 function stageSevenZipBin(stage) {
-  const builderRequire = createRequire(require.resolve("electron-builder/package.json"));
-  let resolved;
-  let bin;
+  const electronBuilderId = require.resolve("electron-builder/package.json");
+  const electronBuilderRequire = createRequire(electronBuilderId);
+  let binSourceId;
   try {
-    resolved = builderRequire.resolve("7zip-bin");
-    bin = require(resolved);
+    binSourceId = electronBuilderRequire.resolve("7zip-bin");
   } catch (e) {
     console.error("packager: 7zip-bin not resolvable from electron-builder: " + e.message);
     process.exit(2);
   }
+  const bin = require(binSourceId);
   const patched = {};
   for (const [key, source] of Object.entries(bin)) {
     if (typeof source !== "string" || !fs.existsSync(source)) {
@@ -101,16 +103,72 @@ function stageSevenZipBin(stage) {
     fs.chmodSync(copy, 0o755);
     patched[key] = copy;
   }
-  const fake = new (require("module").Module)(resolved, null);
+  const fake = new (require("module").Module)(binSourceId, null);
   fake.exports = patched;
   fake.loaded = true;
-  for (const id of new Set([resolved, fs.realpathSync(resolved)])) {
-    require.cache[id] = fake;
+
+  const anchors = new Set([binSourceId]);
+  for (const pkg of ["app-builder-lib", "builder-util"]) {
+    try {
+      anchors.add(electronBuilderRequire.resolve(pkg + "/package.json"));
+    } catch (e) {}
   }
-  if (builderRequire("7zip-bin").path7za !== patched.path7za) {
-    console.error("packager: the 7zip-bin alias did not take; electron-builder would chmod the read-only store copy");
-    process.exit(2);
+  const aliasedIds = new Set();
+  for (const anchorId of anchors) {
+    const anchorRequire = createRequire(anchorId);
+    let id;
+    try {
+      id = anchorRequire.resolve("7zip-bin");
+    } catch (e) {
+      continue;
+    }
+    for (const key of new Set([id, fs.realpathSync(id)])) {
+      require.cache[key] = fake;
+      aliasedIds.add(key);
+    }
   }
+
+  for (const anchorId of anchors) {
+    const anchorRequire = createRequire(anchorId);
+    let seen;
+    try {
+      seen = anchorRequire("7zip-bin").path7za;
+    } catch (e) {
+      continue;
+    }
+    if (seen !== patched.path7za) {
+      console.error("packager: the 7zip-bin alias did not take for the anchor " +
+                    anchorId + "; electron-builder would chmod the read-only store copy");
+      process.exit(2);
+    }
+  }
+}
+
+// app-builder's icon converter chmods its input; the default icons live
+// in app-builder-lib's read-only templates, so when the platform config
+// leaves the icon unset the conversion gets a staged copy instead.
+function stageDefaultIcon(stage, platKey, config) {
+  const template = {
+    linux: "electron-linux/256x256.png",
+    win: "electron-win/icon.ico",
+  }[platKey];
+  if (!template) return;
+  const platConfig = config[platKey] || (config[platKey] = {});
+  if (platConfig.icon) return;
+  const electronBuilderRequire = createRequire(require.resolve("electron-builder/package.json"));
+  let source;
+  try {
+    const libId = electronBuilderRequire.resolve("app-builder-lib/package.json");
+    source = path.join(path.dirname(libId), "templates", ...template.split("/"));
+  } catch (e) {
+    return;
+  }
+  if (!fs.existsSync(source)) return;
+  const copy = path.join(stage, "default-icon", path.basename(template));
+  fs.mkdirSync(path.dirname(copy), { recursive: true });
+  fs.copyFileSync(source, copy);
+  fs.chmodSync(copy, 0o644);
+  platConfig.icon = copy;
 }
 
 function stageBuilderCache(builderCacheFiles, stage, homeDir, sevenZipRoot) {
@@ -471,6 +529,7 @@ async function main() {
   const plat = platformMap[platKey];
   if (!plat) throw new Error("Unknown platform for target: " + target);
   const archEnum = archMap[arch] || Arch.x64;
+  stageDefaultIcon(stage, platKey, rawConfig);
   const targets = plat.createTarget(target, archEnum);
   const opts = {
     targets: targets,
