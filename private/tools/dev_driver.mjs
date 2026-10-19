@@ -77,6 +77,11 @@ for (const [signalName, exitCode] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHU
 }
 
 function copyTreeContents(source, destination) {
+  if (!fs.statSync(source).isDirectory()) {
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(source, destination);
+    return;
+  }
   fs.mkdirSync(destination, { recursive: true });
   for (const entry of fs.readdirSync(source)) {
     copyTreeContents(path.join(source, entry), path.join(destination, entry));
