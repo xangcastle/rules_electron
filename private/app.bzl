@@ -86,6 +86,9 @@ def electron_app(
         packaged_node_modules = None,
         dev_args = None,
         dev_bundle_dest = "dist",
+        dev_server = None,
+        dev_server_url = "http://localhost:5173",
+        dev_server_env = "VITE_DEV_SERVER_URL",
         native_addons = None,
         visibility = None,
         **kwargs):
@@ -133,6 +136,14 @@ def electron_app(
         dev_bundle_dest: Stage directory the dev bundles merge into; "." is
             the asar-root layout apps whose electron-builder config remaps
             dist to the package root ship with.
+        dev_server: Executable serving the renderer with HMR for the dev
+            target (e.g. a rules_vite vite_run target). The dev target starts
+            it, waits for dev_server_url and launches Electron with the URL
+            exported as dev_server_env; the renderer bundle is not staged.
+            Packaging is unaffected.
+        dev_server_url: URL the dev server answers on.
+        dev_server_env: Environment variable carrying the URL into the main
+            process, which must load it instead of the staged renderer.
         native_addons: Dict arch -> {npm package name: [node_addon targets]}.
             Only macOS targets consume addons.
         visibility: Standard visibility (None = package default).
@@ -173,8 +184,11 @@ def electron_app(
         bundle_dest = dev_bundle_dest,
         bundles = [b for b in bundle_labels if b != renderer],
         electron_zip = _host_electron_zip(electron_cache),
-        renderer = renderer or None,
+        renderer = None if dev_server else (renderer or None),
         renderer_subdir = renderer_subdir,
+        dev_server = dev_server,
+        dev_server_url = dev_server_url,
+        dev_server_env = dev_server_env,
         env = env,
         native_addons = {
             label: pkg

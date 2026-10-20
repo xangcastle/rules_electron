@@ -5,13 +5,21 @@ with the fixed argv [manifest, package.json, electron zip or '-', bundle
 count, resource count, app_main] followed by the bazel run passthrough.
 The driver reads everything else from the manifest (bundles and resources
 as {src, dest} entries, packaged module names, native addon files, the
-execroot-relative node_modules root): the stub's argument ceiling bounds
-the argv, not the manifest.
+execroot-relative node_modules root, the optional dev server): the stub's
+argument ceiling bounds the argv, not the manifest.
 
 The driver stages the bundles into an ephemeral dist/ layout, extracts the
 pinned Electron zip (electron_caches), symlinks the linked node_modules, and
 executes the Electron binary with stdio inherited and signals forwarded.
 The stage is removed on exit; bundle changes require re-running bazel run.
+
+With a dev_server the renderer is not staged: the driver starts that
+executable (a rules_vite vite_run target, or anything serving the renderer
+with HMR), waits until dev_server_url answers and launches Electron with the
+URL exported as dev_server_env, so the main process loads it instead of the
+staged dist/. Renderer edits reach the window through the server's own HMR;
+main-process edits still require re-running bazel run. Either process
+exiting shuts the other down.
 """
 
 load("@hermetic_launcher//launcher:lib.bzl", "launcher")
@@ -50,6 +58,18 @@ def _electron_dev_impl(ctx):
         fail("electron_dev(%s): node_modules target exposes no files; pass " % ctx.label.name +
              "the app's npm_link_all_packages target.")
 
+    dev_server = None
+    if ctx.attr.dev_server:
+        server_environment = {}
+        if RunEnvironmentInfo in ctx.attr.dev_server:
+            server_environment = dict(ctx.attr.dev_server[RunEnvironmentInfo].environment)
+        dev_server = {
+            "executable": runfiles_rel(ctx.executable.dev_server),
+            "url": ctx.attr.dev_server_url,
+            "env": ctx.attr.dev_server_env,
+            "environment": server_environment,
+        }
+
     manifest = ctx.actions.declare_file(ctx.label.name + "_manifest.json")
     ctx.actions.write(
         output = manifest,
@@ -60,6 +80,7 @@ def _electron_dev_impl(ctx):
             "packaged_modules": packaged_modules,
             "native_addons": native_addon_args,
             "node_modules_root": nm_dir,
+            "dev_server": dev_server,
         }),
     )
 
@@ -88,6 +109,9 @@ def _electron_dev_impl(ctx):
             for dep in ctx.attr.node_modules
         ]),
     )
+    if ctx.attr.dev_server:
+        runfiles = runfiles.merge(ctx.runfiles(files = [ctx.executable.dev_server]))
+        runfiles = runfiles.merge(ctx.attr.dev_server[DefaultInfo].default_runfiles)
 
     return [
         DefaultInfo(executable = executable, runfiles = runfiles),
@@ -104,6 +128,22 @@ _electron_dev = rule(
         "bundles": attr.label_list(
             doc = "Bundle outputs staged into dist/ (contents merged).",
             allow_files = True,
+        ),
+        "dev_server": attr.label(
+            executable = True,
+            cfg = "target",
+            doc = "Executable serving the renderer with HMR (e.g. a rules_vite " +
+                  "vite_run target), run alongside Electron from the same " +
+                  "runfiles tree; its RunEnvironmentInfo is honoured. The " +
+                  "renderer bundle is not staged when set.",
+        ),
+        "dev_server_url": attr.string(
+            default = "http://localhost:5173",
+            doc = "URL the dev server answers on; Electron starts once it does.",
+        ),
+        "dev_server_env": attr.string(
+            default = "VITE_DEV_SERVER_URL",
+            doc = "Environment variable carrying dev_server_url into the main process.",
         ),
         "electron_zip": attr.label(
             allow_single_file = True,
@@ -173,6 +213,9 @@ def electron_dev(
         renderer = None,
         renderer_subdir = "renderer",
         app_main = "index.js",
+        dev_server = None,
+        dev_server_url = "http://localhost:5173",
+        dev_server_env = "VITE_DEV_SERVER_URL",
         env = {},
         tags = [],
         visibility = None,
@@ -182,6 +225,11 @@ def electron_dev(
     Stages bundles into an ephemeral dist/, extracts the pinned Electron zip
     and executes it against the stage. Stdio is inherited; Ctrl+C reaches the
     app. The stage is removed on exit.
+
+    With dev_server the renderer comes from that server instead of the stage:
+    the driver starts it, waits for dev_server_url to answer and exports it
+    to Electron as dev_server_env, so the main process loads the URL and the
+    server's HMR reaches the window.
 
     Args:
         name: Target name.
@@ -194,8 +242,16 @@ def electron_dev(
             keyed by package name.
         packaged_node_modules: npm package names copied as real dirs into
             the staged node_modules.
+        bundle_dest: Stage directory the bundles merge into.
+        renderer: Optional renderer bundle staged at dist/<renderer_subdir>/.
+        renderer_subdir: Stage subdirectory for the renderer bundle.
         app_main: Entry point under dist/ (informational; package.json main
             governs).
+        dev_server: Executable serving the renderer with HMR (e.g. a
+            rules_vite vite_run target); the renderer is not staged.
+        dev_server_url: URL the dev server answers on.
+        dev_server_env: Environment variable carrying the URL into the main
+            process.
         env: Extra environment variables for the app.
         tags: Standard tags.
         visibility: Standard visibility (None = package default).
@@ -211,6 +267,9 @@ def electron_dev(
         renderer_subdir = renderer_subdir,
         native_addons = native_addons,
         packaged_node_modules = packaged_node_modules,
+        dev_server = dev_server,
+        dev_server_url = dev_server_url,
+        dev_server_env = dev_server_env,
         env = env,
         node_modules = node_modules,
         package_json = package_json,
