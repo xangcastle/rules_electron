@@ -45,16 +45,20 @@ function findNodeModulesRoot(nodeModulesExecrootRel) {
   const runfilesManifest = path.join(runfilesRoot, "MANIFEST");
   const nodeModulesRunfilesRel =
       runfilesRelativeFromExecrootRel(nodeModulesExecrootRel).replace(/\/\//g, "/");
+  const inRunfilesTree = path.join(runfilesRoot, nodeModulesRunfilesRel);
+  if (fs.existsSync(inRunfilesTree)) {
+    return inRunfilesTree;
+  }
   if (fs.existsSync(runfilesManifest)) {
     for (const line of fs.readFileSync(runfilesManifest, "utf8").split("\n")) {
       const sep = line.indexOf(" ");
-      if (sep > 0 && line.slice(0, sep).startsWith(nodeModulesRunfilesRel + "/")) {
-        const absolute = line.slice(sep + 1);
-        return absolute.slice(0, absolute.length - (line.slice(0, sep).length - nodeModulesRunfilesRel.length));
+      const target = line.slice(sep + 1);
+      if (sep > 0 && line.slice(0, sep).startsWith(nodeModulesRunfilesRel + "/") && path.isAbsolute(target)) {
+        return target.slice(0, target.length - (line.slice(0, sep).length - nodeModulesRunfilesRel.length));
       }
     }
   }
-  console.error("dev_driver: node_modules tree not found in the runfiles manifest at " + nodeModulesRunfilesRel);
+  console.error("dev_driver: node_modules tree not found in the runfiles at " + nodeModulesRunfilesRel);
   process.exit(2);
 }
 
@@ -269,11 +273,16 @@ async function waitForDevServer(url, child, timeoutMs) {
 const electronEnv = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "1" };
 
 if (spec.dev_server) {
-  const { executable, url, env: urlVariable, environment } = spec.dev_server;
+  const { executable, url, env: urlVariable, environment, app_env_keys: appEnvKeys } = spec.dev_server;
+  const serverEnvironment = { ...process.env };
+  for (const key of appEnvKeys ?? []) {
+    delete serverEnvironment[key];
+  }
+  Object.assign(serverEnvironment, environment);
   devServer = spawn(resolveInput(executable), [], {
     stdio: ["ignore", "inherit", "inherit"],
     detached: true,
-    env: { ...process.env, ...environment },
+    env: serverEnvironment,
   });
   devServer.on("exit", (exitCode, signalName) => {
     if (!shuttingDown) {

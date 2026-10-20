@@ -79,8 +79,11 @@ electron_app(
 ```
 
 `bazel run //:my_app.dev` then starts the server from the same runfiles
-tree (its `RunEnvironmentInfo` is honoured), waits until `dev_server_url`
-answers, and launches Electron with the URL exported as `dev_server_env`.
+tree, waits until `dev_server_url` answers, and launches Electron with the
+URL exported as `dev_server_env`. The server gets its own
+`RunEnvironmentInfo` and does not inherit the app's `env`: that one is for
+Electron and packaging (a `NODE_ENV=production` there would otherwise turn
+vite's Fast Refresh into full page reloads).
 The renderer bundle is not staged, so the launch skips its build; main,
 preload and `resources` are staged as before. Either process exiting shuts
 the other down (SIGTERM, then SIGKILL after 3s), and the server's own exit
