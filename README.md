@@ -52,6 +52,59 @@ Requirements:
 - `7zip-bin` must be a dependency of the app (the packager and the dev
   launcher use `7za` to extract the pinned toolsets).
 
+### HMR with a dev server
+
+Staged bundles are a snapshot: an edit needs another `bazel run`. With
+`dev_server` the renderer is served live instead. The attribute takes any
+executable that serves the renderer with HMR — a
+[rules_vite](https://github.com/xangcastle/rules_vite) `vite_run` target is
+the natural fit, since it runs vite against the real workspace tree:
+
+```starlark
+load("@rules_vite//:defs.bzl", "vite_run")
+
+vite_run(
+    name = "renderer.dev",
+    args = ["--port", "5173", "--strictPort"],
+    node_modules = ":node_modules",
+)
+
+electron_app(
+    name = "my_app",
+    dev_server = ":renderer.dev",
+    # dev_server_url = "http://localhost:5173",
+    # dev_server_env = "VITE_DEV_SERVER_URL",
+    ...
+)
+```
+
+`bazel run //:my_app.dev` then starts the server from the same runfiles
+tree (its `RunEnvironmentInfo` is honoured), waits until `dev_server_url`
+answers, and launches Electron with the URL exported as `dev_server_env`.
+The renderer bundle is not staged, so the launch skips its build; main,
+preload and `resources` are staged as before. Either process exiting shuts
+the other down (SIGTERM, then SIGKILL after 3s), and the server's own exit
+cleanup — rules_vite removes the `node_modules` link it placed in the
+workspace — runs as part of it.
+
+The main process owns the last step: load the URL when the variable is set
+and fall back to the staged renderer otherwise.
+
+```js
+const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+if (devServerUrl) {
+  mainWindow.loadURL(devServerUrl);
+} else {
+  mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+}
+```
+
+Renderer edits reach the window through the server's HMR. Main-process and
+preload edits are still a staged snapshot and require another `bazel run`.
+Pin the port (`--strictPort`) so `dev_server_url` stays truthful: with
+vite's default port fallback the driver would wait on a URL nobody serves.
+Packaging ignores `dev_server` entirely.
+
 ## Quickstart
 
 ```starlark

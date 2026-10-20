@@ -69,11 +69,66 @@ const removeStage = () => {
   try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}
 };
 process.on("exit", removeStage);
-for (const [signalName, exitCode] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) {
-  process.on(signalName, () => {
+
+let electron = null;
+let devServer = null;
+let shuttingDown = false;
+
+function isRunning(child) {
+  return child !== null && child.exitCode === null && child.signalCode === null;
+}
+
+function signalProcessGroup(child, signalName) {
+  if (!isRunning(child)) {
+    return;
+  }
+  try {
+    process.kill(-child.pid, signalName);
+  } catch {
+    try { child.kill(signalName); } catch {}
+  }
+}
+
+function shutdown(exitCode, signalName = "SIGTERM") {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  signalProcessGroup(devServer, signalName);
+  if (isRunning(electron)) {
+    electron.kill(signalName);
+  }
+  const finish = () => {
     removeStage();
     process.exit(exitCode);
-  });
+  };
+  const survivors = [devServer, electron].filter(isRunning);
+  if (survivors.length === 0) {
+    finish();
+    return;
+  }
+  const escalation = setTimeout(() => {
+    signalProcessGroup(devServer, "SIGKILL");
+    if (isRunning(electron)) {
+      electron.kill("SIGKILL");
+    }
+  }, 3000);
+  const hardStop = setTimeout(finish, 6000);
+  let remaining = survivors.length;
+  for (const survivor of survivors) {
+    survivor.once("exit", () => {
+      remaining -= 1;
+      if (remaining === 0) {
+        clearTimeout(escalation);
+        clearTimeout(hardStop);
+        finish();
+      }
+    });
+  }
+}
+
+for (const [signalName, exitCode] of [["SIGINT", 130], ["SIGTERM", 143], ["SIGHUP", 129]]) {
+  process.on(signalName, () => shutdown(exitCode, signalName));
 }
 
 function copyTreeContents(source, destination) {
@@ -194,15 +249,58 @@ if (!fs.existsSync(electronBin)) {
   process.exit(2);
 }
 
-const child = spawn(electronBin, [stage, ...passthroughArgs], {
+const DEV_SERVER_TIMEOUT_MS = 60_000;
+
+async function waitForDevServer(url, child, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isRunning(child)) {
+      return "exited";
+    }
+    try {
+      await fetch(url, { signal: AbortSignal.timeout(2000) });
+      return "ready";
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return "timeout";
+}
+
+const electronEnv = { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "1" };
+
+if (spec.dev_server) {
+  const { executable, url, env: urlVariable, environment } = spec.dev_server;
+  devServer = spawn(resolveInput(executable), [], {
+    stdio: ["ignore", "inherit", "inherit"],
+    detached: true,
+    env: { ...process.env, ...environment },
+  });
+  devServer.on("exit", (exitCode, signalName) => {
+    if (!shuttingDown) {
+      console.error("dev_driver: the dev server exited (" + (signalName ?? exitCode) + ")" +
+                    (isRunning(electron) ? "; stopping Electron" : " before Electron started"));
+      shutdown(exitCode ?? 1);
+    }
+  });
+  const outcome = await waitForDevServer(url, devServer, DEV_SERVER_TIMEOUT_MS);
+  if (outcome === "timeout") {
+    console.error("dev_driver: the dev server did not answer at " + url + " within " +
+                  (DEV_SERVER_TIMEOUT_MS / 1000) + "s; is it listening on that URL?");
+    shutdown(2);
+  }
+  if (outcome !== "ready") {
+    await new Promise(() => {});
+  }
+  electronEnv[urlVariable] = url;
+}
+
+electron = spawn(electronBin, [stage, ...passthroughArgs], {
   cwd: stage,
   stdio: "inherit",
-  env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: "1" },
+  env: electronEnv,
 });
-for (const signalName of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  process.on(signalName, () => child.kill(signalName));
-}
-child.on("exit", (exitCode, signalName) => {
-  removeStage();
-  process.exit(signalName ? 130 : (exitCode ?? 0));
+electron.on("exit", (exitCode, signalName) => {
+  if (!shuttingDown) {
+    shutdown(signalName ? 130 : (exitCode ?? 0));
+  }
 });
