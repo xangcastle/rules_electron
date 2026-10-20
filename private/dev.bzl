@@ -68,6 +68,7 @@ def _electron_dev_impl(ctx):
             "url": ctx.attr.dev_server_url,
             "env": ctx.attr.dev_server_env,
             "environment": server_environment,
+            "app_env_keys": sorted(ctx.attr.env.keys()),
         }
 
     manifest = ctx.actions.declare_file(ctx.label.name + "_manifest.json")
