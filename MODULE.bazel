@@ -12,3 +12,38 @@ bazel_dep(name = "platforms", version = "0.0.11")
 
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 bazel_dep(name = "bazel_skylib", version = "1.9.0", dev_dependency = True)
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+
+http_archive(
+    name = "rcodesign_aarch64_apple_darwin",
+    build_file_content = 'exports_files(["rcodesign"], visibility = ["//visibility:public"])',
+    sha256 = "d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a",
+    strip_prefix = "apple-codesign-0.29.0-aarch64-apple-darwin",
+    url = "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-aarch64-apple-darwin.tar.gz",
+)
+
+http_archive(
+    name = "rcodesign_aarch64_unknown_linux_musl",
+    build_file_content = 'exports_files(["rcodesign"], visibility = ["//visibility:public"])',
+    sha256 = "4af92c87ddf52f5f2d1258a3b4e56c7dcb8f1b2468df744976c5f139e031961f",
+    strip_prefix = "apple-codesign-0.29.0-aarch64-unknown-linux-musl",
+    url = "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-aarch64-unknown-linux-musl.tar.gz",
+)
+
+http_archive(
+    name = "rcodesign_x86_64_apple_darwin",
+    build_file_content = 'exports_files(["rcodesign"], visibility = ["//visibility:public"])',
+    sha256 = "14ef11bedd51a8d95eafd767939ae96d5900e5a61511bef75bb21db6e7c74140",
+    strip_prefix = "apple-codesign-0.29.0-x86_64-apple-darwin",
+    url = "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-apple-darwin.tar.gz",
+)
+
+http_archive(
+    name = "rcodesign_x86_64_unknown_linux_musl",
+    build_file_content = 'exports_files(["rcodesign"], visibility = ["//visibility:public"])',
+    sha256 = "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002",
+    strip_prefix = "apple-codesign-0.29.0-x86_64-unknown-linux-musl",
+    url = "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz",
+)

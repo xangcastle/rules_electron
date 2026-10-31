@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -363,11 +363,47 @@ function pinAppOutDirMtimesToSourceDateEpoch(config, stage) {
     const userHook = config[hookName];
     config[hookName] = async (context) => {
       if (userHook) {
-        const hookModule = require(path.resolve(stage, userHook));
+        const hookModule = typeof userHook === "function" ?
+          userHook :
+          require(path.resolve(stage, userHook));
         await (hookModule.default || hookModule)(context);
       }
       pinTreeMtimes(context.appOutDir, epochSeconds);
     };
+  }
+}
+
+function findMacAppBundles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.endsWith(".app"))
+      .map((entry) => path.join(dir, entry.name));
+}
+
+function signMacAppAdHocAfterPack(config, stage, codesign) {
+  const userHook = config.afterPack;
+  config.afterPack = async (context) => {
+    if (userHook) {
+      const hookModule = typeof userHook === "function" ?
+        userHook :
+        require(path.resolve(stage, userHook));
+      await (hookModule.default || hookModule)(context);
+    }
+    for (const appBundle of findMacAppBundles(context.appOutDir)) {
+      const result = spawnSync(codesign, ["sign", appBundle], { encoding: "utf8" });
+      if (result.status !== 0) {
+        console.error(result.stdout, result.stderr);
+        throw new Error("rcodesign failed to sign " + appBundle);
+      }
+    }
+  };
+}
+
+function removeUnpackedMacAppDirectories(outDir) {
+  for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
+    const entryPath = path.join(outDir, entry.name);
+    if (entry.isDirectory() && findMacAppBundles(entryPath).length) {
+      fs.rmSync(entryPath, { recursive: true, force: true });
+    }
   }
 }
 
@@ -516,6 +552,18 @@ function platformFromTarget(targetName) {
   throw new Error("Unknown target: " + targetName);
 }
 
+function splitPlatformPrefix(rawTarget) {
+  const separator = rawTarget.indexOf(":");
+  if (separator < 0) {
+    return { platKey: platformFromTarget(rawTarget), builderTarget: rawTarget };
+  }
+  const platKey = rawTarget.slice(0, separator);
+  if (!["linux", "mac", "win"].includes(platKey)) {
+    throw new Error("Unknown platform prefix in target: " + rawTarget);
+  }
+  return { platKey, builderTarget: rawTarget.slice(separator + 1) };
+}
+
 function collectFiles(dir, relativePath = "") {
   const entries = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -558,6 +606,7 @@ async function main() {
   const nodeModules = arg("node_modules");
   const electronCache = arg("electron_cache");
   const extraEnvRaw = arg("extra_env");
+  const codesignArg = arg("codesign");
 
   if (!outDir || !target || !arch) {
     console.error("packager: missing required args --out, --target, --arch");
@@ -566,6 +615,7 @@ async function main() {
 
   const execrootBeforeChdir = process.cwd();
   const outDirAbs = path.resolve(execrootBeforeChdir, outDir);
+  const codesign = codesignArg ? path.resolve(execrootBeforeChdir, codesignArg) : null;
   const abs = (p) => path.resolve(execrootBeforeChdir, p);
 
   const stage = path.join(
@@ -695,10 +745,14 @@ async function main() {
     ...argList("packaged_module"),
   ]);
   shipRuntimePackagesThroughExplicitFileCopies(rawConfig, runtimePackageNames);
-  disableMacosSigningForMasTargets(rawConfig, target);
-  dropDmgApplicationsSymlinkEntry(rawConfig, target);
+  const { platKey, builderTarget } = splitPlatformPrefix(target);
+  disableMacosSigningForMasTargets(rawConfig, builderTarget);
+  dropDmgApplicationsSymlinkEntry(rawConfig, builderTarget);
   skipWindowsExecutableStampingWithoutWine(rawConfig);
   wireBazelLifecycleScripts(rawConfig, stage);
+  if (codesign && platKey === "mac") {
+    signMacAppAdHocAfterPack(rawConfig, stage, codesign);
+  }
   pinAppOutDirMtimesToSourceDateEpoch(rawConfig, stage);
   flattenArtifactNameForBazelTreeArtifacts(rawConfig);
 
@@ -713,12 +767,11 @@ async function main() {
     ia32: Arch.ia32,
     universal: Arch.universal,
   };
-  const platKey = platformFromTarget(target);
   const plat = platformMap[platKey];
   if (!plat) throw new Error("Unknown platform for target: " + target);
   const archEnum = archMap[arch] || Arch.x64;
   stageDefaultPlatformIconCopyWhenUnset(stage, platKey, rawConfig);
-  const electronBuilderTargets = plat.createTarget(target, archEnum);
+  const electronBuilderTargets = plat.createTarget(builderTarget, archEnum);
   const opts = {
     targets: electronBuilderTargets,
     config: {
@@ -732,6 +785,9 @@ async function main() {
     },
   };
   await build(opts);
+  if (platKey === "mac") {
+    removeUnpackedMacAppDirectories(outDirAbs);
+  }
 
   auditRedirectedHomeStayedEmpty(homeDir);
 }

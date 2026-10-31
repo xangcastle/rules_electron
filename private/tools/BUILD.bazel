@@ -10,3 +10,26 @@ js_library(
     srcs = ["packager.mjs"],
     visibility = ["//visibility:public"],
 )
+
+[
+    config_setting(
+        name = os + "_" + cpu,
+        constraint_values = [
+            "@platforms//os:" + os,
+            "@platforms//cpu:" + cpu,
+        ],
+    )
+    for os in ["linux", "macos"]
+    for cpu in ["aarch64", "x86_64"]
+]
+
+alias(
+    name = "rcodesign",
+    actual = select({
+        ":linux_aarch64": "@rcodesign_aarch64_unknown_linux_musl//:rcodesign",
+        ":linux_x86_64": "@rcodesign_x86_64_unknown_linux_musl//:rcodesign",
+        ":macos_aarch64": "@rcodesign_aarch64_apple_darwin//:rcodesign",
+        ":macos_x86_64": "@rcodesign_x86_64_apple_darwin//:rcodesign",
+    }),
+    visibility = ["//visibility:public"],
+)
