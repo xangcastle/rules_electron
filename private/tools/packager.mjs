@@ -348,6 +348,29 @@ function wireBazelLifecycleScripts(config, stage) {
   }
 }
 
+function pinTreeMtimes(dir, epochSeconds) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) pinTreeMtimes(entryPath, epochSeconds);
+    fs.lutimesSync(entryPath, epochSeconds, epochSeconds);
+  }
+  fs.lutimesSync(dir, epochSeconds, epochSeconds);
+}
+
+function pinAppOutDirMtimesToSourceDateEpoch(config, stage) {
+  const epochSeconds = Number(process.env.SOURCE_DATE_EPOCH);
+  for (const hookName of ["afterPack", "afterSign"]) {
+    const userHook = config[hookName];
+    config[hookName] = async (context) => {
+      if (userHook) {
+        const hookModule = require(path.resolve(stage, userHook));
+        await (hookModule.default || hookModule)(context);
+      }
+      pinTreeMtimes(context.appOutDir, epochSeconds);
+    };
+  }
+}
+
 function stageElectronVersionFromRunnerRunfiles(stage) {
   try {
     const electronPackageJsonPath = require.resolve("electron/package.json");
@@ -676,6 +699,7 @@ async function main() {
   dropDmgApplicationsSymlinkEntry(rawConfig, target);
   skipWindowsExecutableStampingWithoutWine(rawConfig);
   wireBazelLifecycleScripts(rawConfig, stage);
+  pinAppOutDirMtimesToSourceDateEpoch(rawConfig, stage);
   flattenArtifactNameForBazelTreeArtifacts(rawConfig);
 
   const platformMap = {
