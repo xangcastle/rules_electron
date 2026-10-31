@@ -160,6 +160,13 @@ def _node_headers_impl(rctx):
             "    srcs = [\"include/node/node_api.h\"],",
             "    visibility = [\"//visibility:public\"],",
             ")",
+            "",
+            "cc_library(",
+            "    name = \"node_api\",",
+            "    hdrs = glob([\"include/node/**/*.h\"]),",
+            "    includes = [\"include/node\"],",
+            "    visibility = [\"//visibility:public\"],",
+            ")",
         ]),
     )
 
