@@ -26,6 +26,8 @@ node_addon = _node_addon
 _MACOS_TARGETS = ["dmg", "mas", "mas-dev", "pkg"]
 _WINDOWS_TARGETS = ["nsis", "squirrel.windows", "msi", "portable", "appx", "zip"]
 
+_PLATFORM_PREFIXES = {"linux": "linux", "mac": "macos", "win": "windows"}
+
 _TARGET_TOOLS = {
     "appimage": ["appimage"],
     "dmg": ["dmgbuild"],
@@ -119,7 +121,11 @@ def electron_app(
         resources: Additional resources staged preserving package-relative paths.
         env: Env vars for packaging and the dev target.
         targets: electron-builder targets (e.g. tar.gz, appimage, deb, nsis,
-            dmg, mas). Default: ['tar.gz'].
+            dmg, mas). Default: ['tar.gz']. A `linux:`, `mac:` or `win:`
+            prefix picks the platform of a target valid on several of them
+            (`mac:zip`; a bare `zip` is Windows). macOS archives (`mac:zip`,
+            `mac:tar.gz`) package on any host and join <name>.package;
+            dmg/pkg/mas need a macOS host.
         archs: Architectures (default ['x64']).
         electron_cache: Repository name of the Electron zip cache from the
             electron_caches extension (e.g. "@electron_cache_v37_6_1",
@@ -215,17 +221,29 @@ def electron_app(
     )
 
     pkg_by_platform = {"linux": [], "macos": [], "windows": []}
+    host_independent_macos = []
 
     for target in targets:
-        safe = target.replace(".", "_").replace("-", "_")
-        if target in _MACOS_TARGETS:
-            plat = "macos"
-        elif target in _WINDOWS_TARGETS:
-            plat = "windows"
+        safe = target.replace(".", "_").replace("-", "_").replace(":", "_")
+        prefix, has_prefix, builder_target = target.partition(":")
+        if has_prefix:
+            if prefix not in _PLATFORM_PREFIXES:
+                fail("electron_app(%s): target %s: platform prefix must be one of %s" % (
+                    name,
+                    target,
+                    ", ".join(sorted(_PLATFORM_PREFIXES.keys())),
+                ))
+            plat = _PLATFORM_PREFIXES[prefix]
         else:
-            plat = "linux"
+            builder_target = target
+            if target in _MACOS_TARGETS:
+                plat = "macos"
+            elif target in _WINDOWS_TARGETS:
+                plat = "windows"
+            else:
+                plat = "linux"
 
-        required_tools = _TARGET_TOOLS.get(target, [])
+        required_tools = _TARGET_TOOLS.get(builder_target, [])
         if required_tools and not builder_tools:
             fail(
                 "electron_app(%s): target %s needs the packaging toolsets; " % (name, target) +
@@ -256,8 +274,11 @@ def electron_app(
             )
             if kwargs:
                 builder_kwargs.update(kwargs)
-            if target in _MACOS_TARGETS:
+            if builder_target in _MACOS_TARGETS:
                 builder_kwargs["target_compatible_with"] = ["@platforms//os:macos"]
+            elif plat == "macos":
+                builder_kwargs["codesign"] = Label("//private/tools:rcodesign")
+            if plat == "macos":
                 addons = (native_addons or {}).get(arch)
                 if addons:
                     builder_kwargs["native_addons"] = {
@@ -274,6 +295,8 @@ def electron_app(
                 **builder_kwargs
             )
             pkg_by_platform[plat].append(":" + label)
+            if plat == "macos" and builder_target not in _MACOS_TARGETS:
+                host_independent_macos.append(":" + label)
 
         native.filegroup(
             name = "%s.package.%s" % (app_name, safe),
@@ -289,7 +312,7 @@ def electron_app(
                 visibility = visibility,
             )
 
-    aggregate = pkg_by_platform["linux"] + pkg_by_platform["windows"]
+    aggregate = pkg_by_platform["linux"] + pkg_by_platform["windows"] + host_independent_macos
     if aggregate:
         native.filegroup(
             name = app_name + ".package",

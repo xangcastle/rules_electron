@@ -84,6 +84,11 @@ def _electron_builder_impl(ctx):
     if ctx.attr.extra_env:
         args.add("--extra_env", json.encode(ctx.attr.extra_env))
 
+    codesign_files = []
+    if ctx.attr.codesign:
+        args.add("--codesign", ctx.executable.codesign.path)
+        codesign_files.append(ctx.executable.codesign)
+
     inputs = depset(
         ctx.files.bundles +
         ctx.files.scripts +
@@ -94,12 +99,13 @@ def _electron_builder_impl(ctx):
         (ctx.files.electron_cache if ctx.attr.electron_cache else []) +
         (ctx.files.renderer_bundle if ctx.attr.renderer_bundle else []) +
         builder_cache_files +
-        addon_files,
+        addon_files +
+        codesign_files,
         transitive = [ctx.attr.runner[DefaultInfo].default_runfiles.files],
     )
 
     exec_requirements = {"block-network": "1"}
-    if ctx.attr.target in _TARGETS_MOUNTING_A_DISK_IMAGE_VOLUME:
+    if ctx.attr.target.rpartition(":")[2] in _TARGETS_MOUNTING_A_DISK_IMAGE_VOLUME:
         exec_requirements["no-sandbox"] = "1"
 
     ctx.actions.run(
@@ -138,6 +144,14 @@ electron_builder = rule(
         "bundles": attr.label_list(
             doc = "Bundle output directories staged into dist/ (main, preload, renderer).",
             allow_files = True,
+        ),
+        "codesign": attr.label(
+            cfg = "exec",
+            executable = True,
+            allow_single_file = True,
+            doc = "rcodesign for macOS targets packaged off a Mac: the app is " +
+                  "signed ad hoc before archiving, since Apple Silicon kills " +
+                  "an arm64 binary whose signature no longer matches.",
         ),
         "config": attr.label(
             mandatory = True,
