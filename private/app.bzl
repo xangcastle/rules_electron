@@ -92,6 +92,7 @@ def electron_app(
         dev_server_url = "http://localhost:5173",
         dev_server_env = "VITE_DEV_SERVER_URL",
         native_addons = None,
+        dev_native_addons = None,
         visibility = None,
         **kwargs):
     """Creates all targets for an Electron application.
@@ -152,6 +153,10 @@ def electron_app(
             process, which must load it instead of the staged renderer.
         native_addons: Dict arch -> {npm package name: [node_addon targets]}.
             Only macOS targets consume addons.
+        dev_native_addons: Dict {npm package name: [addon targets]} for the
+            dev target, which runs on the host: e.g. host-built addons while
+            native_addons holds cross-compiled ones per arch. Defaults to
+            every addon of native_addons.
         visibility: Standard visibility (None = package default).
         **kwargs: Forwarded to the generated rules.
     """
@@ -197,6 +202,10 @@ def electron_app(
         dev_server_env = dev_server_env,
         env = env,
         native_addons = {
+            label: pkg
+            for pkg, labels in dev_native_addons.items()
+            for label in labels
+        } if dev_native_addons != None else {
             label: pkg
             for arch, pkgs in (native_addons or {}).items()
             for pkg, labels in pkgs.items()
