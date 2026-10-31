@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
@@ -10,6 +11,10 @@ const NATIVE_ADDON_RUNTIME_HELPERS = ["bindings", "file-uri-to-path"];
 const REDIRECTED_HOME_ALLOWED_TOP_LEVEL_ENTRIES = new Set([".cache", ".config", "Library"]);
 
 const argv = process.argv.slice(2);
+
+const SQUASHFS_SUPERBLOCK_MKFS_TIME_OFFSET = 8;
+
+const GZIP_HEADER_MTIME_OFFSET = 4;
 
 function arg(name) {
   const i = argv.indexOf("--" + name);
@@ -407,6 +412,68 @@ function removeUnpackedMacAppDirectories(outDir) {
   }
 }
 
+async function runMksquashfsWithPinnedTimes([realMksquashfs, ...args]) {
+  const epochSeconds = Number(process.env.SOURCE_DATE_EPOCH);
+  const [sourceDir, image] = args;
+  const offsetFlag = args.indexOf("-offset");
+  const offset = offsetFlag >= 0 ? Number(args[offsetFlag + 1]) : 0;
+  pinTreeMtimes(sourceDir, epochSeconds);
+  const result = spawnSync(realMksquashfs, args, { stdio: "inherit" });
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+  const mkfsTime = Buffer.alloc(4);
+  mkfsTime.writeUInt32LE(epochSeconds);
+  const fd = fs.openSync(image, "r+");
+  try {
+    fs.writeSync(fd, mkfsTime, 0, mkfsTime.length, offset + SQUASHFS_SUPERBLOCK_MKFS_TIME_OFFSET);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function routeMksquashfsThroughPinnedTimes(cacheDir, stage) {
+  const linuxToolArch = { arm64: "arm64", x64: "x64", ia32: "ia32", arm: "arm32" }[process.arch];
+  const appImageToolsetsDir = path.join(cacheDir, "appimage");
+  if (process.platform !== "linux" || !linuxToolArch || !fs.existsSync(appImageToolsetsDir)) {
+    return;
+  }
+  for (const release of fs.readdirSync(appImageToolsetsDir)) {
+    const realMksquashfs = path.join(appImageToolsetsDir, release, "linux-" + linuxToolArch, "mksquashfs");
+    if (!fs.existsSync(realMksquashfs)) {
+      continue;
+    }
+    const wrapper = path.join(stage, ".mksquashfs-pinned-times.sh");
+    fs.writeFileSync(
+        wrapper,
+        "#!/bin/sh\nexec " + [process.execPath, fileURLToPath(import.meta.url), MKSQUASHFS_WRAPPER_FLAG, realMksquashfs]
+            .map((word) => JSON.stringify(word))
+            .join(" ") + " \"$@\"\n",
+        { mode: 0o755 },
+    );
+    process.env.MKSQUASHFS_PATH = wrapper;
+    return;
+  }
+}
+
+function zeroGzipHeaderMtimes(outDir) {
+  for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".tar.gz")) {
+      continue;
+    }
+    const fd = fs.openSync(path.join(outDir, entry.name), "r+");
+    try {
+      const magic = Buffer.alloc(2);
+      fs.readSync(fd, magic, 0, 2, 0);
+      if (magic[0] === 0x1f && magic[1] === 0x8b) {
+        fs.writeSync(fd, Buffer.alloc(4), 0, 4, GZIP_HEADER_MTIME_OFFSET);
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+}
+
 function stageElectronVersionFromRunnerRunfiles(stage) {
   try {
     const electronPackageJsonPath = require.resolve("electron/package.json");
@@ -727,6 +794,9 @@ async function main() {
     process.env.SOURCE_DATE_EPOCH = "946684800";
   }
   process.env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+  if (electronBuilderCacheDir) {
+    routeMksquashfsThroughPinnedTimes(electronBuilderCacheDir, stage);
+  }
   if (extraEnvRaw) {
     const extra = JSON.parse(extraEnvRaw);
     for (const [k, v] of Object.entries(extra)) process.env[k] = String(v);
@@ -785,6 +855,7 @@ async function main() {
     },
   };
   await build(opts);
+  zeroGzipHeaderMtimes(outDirAbs);
   if (platKey === "mac") {
     removeUnpackedMacAppDirectories(outDirAbs);
   }
@@ -792,7 +863,12 @@ async function main() {
   auditRedirectedHomeStayedEmpty(homeDir);
 }
 
-main().catch((err) => {
+const MKSQUASHFS_WRAPPER_FLAG = "--mksquashfs-wrapper";
+
+(argv[0] === MKSQUASHFS_WRAPPER_FLAG ?
+  runMksquashfsWithPinnedTimes(argv.slice(1)) :
+  main()
+).catch((err) => {
   console.error(err);
   process.exit(1);
 });
